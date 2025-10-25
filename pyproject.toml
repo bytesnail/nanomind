@@ -1,0 +1,7 @@
+[project]
+name = "nanomind"
+version = "0.1.0"
+description = "A study project for llm"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
