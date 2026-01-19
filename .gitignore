@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Experiment outputs
+outputs/
+data/
+*.pth
+*.pt
+*.ckpt
+*.log
+
+# Package manager
+uv.lock
