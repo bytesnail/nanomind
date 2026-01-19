@@ -25,8 +25,15 @@ uv pip install -r requirements.txt
 
 ### 验证安装
 ```bash
+# 基础验证
 python main.py  # 应该输出 "Hello from nanomind!"
 python -c "import torch; print(f'PyTorch: {torch.__version__}')"  # 验证 PyTorch
+
+# 完整环境检查
+python experiments/exp_000_environment_check.py
+
+# 同时输出到终端和日志文件
+python experiments/exp_000_environment_check.py 2>&1 | tee outputs/logs/exp_000_environment_check.log
 ```
 
 ### 常用命令
@@ -218,8 +225,25 @@ set_seed(42)
 ---
 
 ## 实验记录建议
+
+### 环境检查
+每个项目开始前运行环境检查（Exp 000）：
+```bash
+python experiments/exp_000_environment_check.py
+```
+
+记录信息包括：
+- 系统配置（操作系统、CPU、内存、GPU）
+- 软件版本（Python、PyTorch、CUDA、cuDNN）
+- 功能验证（张量操作、矩阵运算、GPU 加速、自动求导）
+
+### 实验日志
 - **超参数**: 在实验脚本顶部或配置文件中记录所有超参数
 - **结果**: 保存训练日志、模型性能指标、可视化图表
+- **日志管理**:
+  - 使用 `tee` 命令同时输出到终端和日志文件
+  - 覆盖式保存：`command | tee log.log`
+  - 追加式保存：`command | tee -a log.log`
 - **可复现性**:
   - 固定所有随机种子（torch.manual_seed、numpy.random.seed、random.seed）
   - 锁定依赖版本（requirements.txt）
