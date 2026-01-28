@@ -11,10 +11,21 @@
 ## 快速开始
 
 ```bash
-conda activate nanomind && uv add torch torchvision transformers datasets --no-sync
-uv pip compile pyproject.toml -o requirements.txt && uv pip install -r requirements.txt
+# 1. 创建并激活 Conda 环境
+conda create -n nanomind python=3.12 -y
+conda activate nanomind
+
+# 2. 安装 CUDA 12.8（用于 GPU 加速）
+conda install -c nvidia cuda=12.8 -y
+
+# 3. 安装项目依赖
+uv pip install -r requirements.txt
+
+# 4. 验证环境配置
 python experiments/exp_000_environment_check.py
 ```
+
+> 📚 **详细的环境初始化和依赖管理说明**请参考：[docs/environment/setup.md](docs/environment/setup.md)
 
 ---
 
