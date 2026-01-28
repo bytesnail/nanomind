@@ -1,3 +1,6 @@
+# opencode/oh-my-opencode
+.sisyphus/
+
 # Python
 __pycache__/
 *.py[cod]
