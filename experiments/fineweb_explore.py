@@ -1,13 +1,13 @@
-"""实验 001: FineWeb-Edu 数据集探索（datatrove优化版）
+"""FineWeb-Edu 数据集探索脚本。
 
 目的：
-- 使用datatrove重写exp_001数据集探索脚本
-- 对HuggingFaceFW/fineweb-edu数据集进行全量分析
+- 使用datatrove对HuggingFaceFW/fineweb-edu数据集进行全量分析
 - 支持多worker并发处理和结果聚合
 - 生成完整的统计报告
 
 运行命令：
-    python experiments/exp_001_dataset_exploration_fineweb_edu.py --data-dir data/datasets/HuggingFaceFW/fineweb-edu/data --output-dir outputs --workers 8 --batch-size 5000
+    python experiments/fineweb_explore.py --config configs/fineweb.yaml
+    python experiments/fineweb_explore.py --data-dir data/datasets/HuggingFaceFW/fineweb-edu/data --output-dir outputs --workers 8 --batch-size 5000
 
 输出：
 - 完整的全量统计数据（JSON）
@@ -24,58 +24,108 @@ import sys
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
+# YAML配置
+import yaml
+
 # DataTrove
 from datatrove.pipeline.readers import ParquetReader
-from datatrove.pipeline.stats import DocStats, LangStats
-from datatrove.executor.local import LocalPipelineExecutor
 
 # 自定义组件
-from exp_002_custom_stats import FinewebEduStatsCollector
+from experiments.fineweb_stats_collector import FinewebEduStatsCollector
+from experiments.utils.common import (
+    setup_logging,
+    create_local_executor,
+    get_timestamp,
+)
 
 
-def get_timestamp() -> str:
-    """获取当前时间戳字符串。
-
-    Returns:
-        格式化的时间戳字符串
-    """
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
-def setup_logging(log_file: str, log_level: str = "INFO") -> logging.Logger:
-    """设置日志记录器。
+def load_config(config_path: str) -> Dict[str, Any]:
+    """加载YAML配置文件。
 
     Args:
-        log_file: 日志文件路径
-        log_level: 日志级别
+        config_path: 配置文件路径
 
     Returns:
-        配置好的logger实例
+        解析后的配置字典
     """
-    logger = logging.getLogger("exp_001_datatrove")
-    logger.setLevel(getattr(logging, log_level.upper()))
-    logger.handlers.clear()
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
 
-    # 文件处理器
-    fh = logging.FileHandler(log_file, encoding="utf-8")
-    fh.setLevel(getattr(logging, log_level.upper()))
 
-    # 控制台处理器
-    ch = logging.StreamHandler()
-    ch.setLevel(getattr(logging, log_level.upper()))
+def create_parser() -> argparse.ArgumentParser:
+    """创建命令行参数解析器。
 
-    # 格式化器
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    支持YAML配置文件和命令行参数，命令行参数会覆盖配置文件中的值。
+
+    Returns:
+        配置好的ArgumentParser实例
+    """
+    parser = argparse.ArgumentParser(
+        description="FineWeb-Edu 数据集探索（datatrove优化版）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例用法:
+  python experiments/fineweb_explore.py
+  python experiments/fineweb_explore.py --config configs/fineweb.yaml
+  python experiments/fineweb_explore.py --config configs/fineweb.yaml --workers 16 --batch-size 10000
+  python experiments/fineweb_explore.py --limit 100000 --log-level DEBUG
+        """,
     )
-    fh.setFormatter(formatter)
-    ch.setFormatter(formatter)
 
-    logger.addHandler(fh)
-    logger.addHandler(ch)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="configs/fineweb.yaml",
+        help="YAML配置文件路径 (默认: configs/fineweb.yaml)",
+    )
 
-    return logger
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        default=None,
+        help="数据集路径 (默认: 从配置文件读取)",
+    )
+
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="输出目录 (默认: 从配置文件读取)",
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="限制处理文档数 (默认: None=全量处理)",
+    )
+
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="并行worker数量 (默认: 从配置文件读取)",
+    )
+
+    parser.add_argument(
+        "--batch-size", type=int, default=None, help="批量大小 (默认: 从配置文件读取)"
+    )
+
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default=None,
+        help="日志级别 (默认: 从配置文件读取)",
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Dry run模式，只打印配置而不执行",
+    )
+
+    return parser
 
 
 def parquet_to_doc_adapter(
@@ -111,57 +161,6 @@ def parquet_to_doc_adapter(
     }
 
     return result
-
-
-def create_parser() -> argparse.ArgumentParser:
-    """创建命令行参数解析器。
-
-    Returns:
-        配置好的ArgumentParser实例
-    """
-    parser = argparse.ArgumentParser(
-        description="FineWeb-Edu 数据集探索（datatrove优化版）",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例用法:
-  python experiments/exp_001_dataset_exploration_fineweb_edu.py
-  python experiments/exp_001_dataset_exploration_fineweb_edu.py --workers 16 --batch-size 10000
-  python experiments/exp_001_dataset_exploration_fineweb_edu.py --limit 100000 --log-level DEBUG
-        """,
-    )
-
-    parser.add_argument(
-        "--data-dir",
-        type=str,
-        default="data/datasets/HuggingFaceFW/fineweb-edu/data",
-        help="数据集路径 (默认: data/datasets/HuggingFaceFW/fineweb-edu/data)",
-    )
-
-    parser.add_argument(
-        "--output-dir", type=str, default="outputs", help="输出目录 (默认: outputs)"
-    )
-
-    parser.add_argument(
-        "--limit", type=int, default=None, help="限制处理文档数 (默认: None=全量处理)"
-    )
-
-    parser.add_argument(
-        "--workers", type=int, default=8, help="并行worker数量 (默认: 8)"
-    )
-
-    parser.add_argument(
-        "--batch-size", type=int, default=5000, help="批量大小 (默认: 5000)"
-    )
-
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        default="INFO",
-        help="日志级别 (默认: INFO)",
-    )
-
-    return parser
 
 
 def setup_output_directories(output_dir: str) -> Dict[str, str]:
@@ -279,28 +278,7 @@ def load_datatrove_stats(output_dir: str) -> Optional[Dict[str, Any]]:
         return combined_stats
 
     except Exception as e:
-        logging.getLogger("exp_001_datatrove").warning(f"无法加载datatrove统计: {e}")
-        return None
-
-        stats_files = []
-        for file in os.listdir(stats_dir):
-            if file.endswith(".json"):
-                stats_files.append(os.path.join(stats_dir, file))
-
-        if not stats_files:
-            return None
-
-        # 读取并合并所有统计文件
-        combined_stats = {}
-        for stats_file in stats_files:
-            with open(stats_file, "r", encoding="utf-8") as f:
-                file_stats = json.load(f)
-                combined_stats.update(file_stats)
-
-        return combined_stats
-
-    except Exception as e:
-        logging.getLogger("exp_001_datatrove").warning(f"无法加载datatrove统计: {e}")
+        logging.getLogger("fineweb_explore").warning(f"无法加载datatrove统计: {e}")
         return None
 
 
@@ -377,14 +355,14 @@ def aggregate_results(
     return result
 
 
-def create_datatrove_pipeline(
+def create_custom_pipeline(
     data_dir: str,
     output_dir: str,
     batch_size: int,
     limit: Optional[int],
     logger: logging.Logger,
 ) -> List:
-    """创建datatrove处理流水线。
+    """创建自定义datatrove处理流水线。
 
     Args:
         data_dir: 数据目录
@@ -396,7 +374,7 @@ def create_datatrove_pipeline(
     Returns:
         配置好的pipeline步骤列表
     """
-    logger.info("配置datatrove pipeline...")
+    logger.info("配置自定义datatrove pipeline...")
 
     pipeline = [
         # 1. ParquetReader - 读取parquet文件
@@ -411,31 +389,7 @@ def create_datatrove_pipeline(
             file_progress=True,
             doc_progress=True,
         ),
-        # 2. DocStats - 文档级统计
-        DocStats(
-            output_folder=output_dir,
-        ),
-        # 2. DocStats - 文档级统计
-        DocStats(
-            output_folder=output_dir,
-        ),
-        # 3. LangStats - 语言统计
-        LangStats(
-            language="language",  # 使用metadata中的language字段
-            output_folder=output_dir,
-        ),
-        # 2. DocStats - 文档级统计
-        DocStats(
-            output_folder=output_dir,
-            groups_to_compute=["summary", "histogram", "fqdn", "suffix"],
-        ),
-        # 3. LangStats - 语言统计
-        LangStats(
-            language="language",  # 使用metadata中的language字段
-            output_folder=output_dir,
-            groups_to_compute=["summary", "histogram"],
-        ),
-        # 4. FinewebEduStatsCollector - 自定义统计
+        # 2. FinewebEduStatsCollector - 自定义统计（包含域名分布、快照统计、score/int_score分布）
         FinewebEduStatsCollector(output_folder=output_dir),
     ]
 
@@ -464,12 +418,10 @@ def run_pipeline(
     logger.info("开始运行datatrove pipeline...")
 
     # 创建pipeline
-    pipeline = create_datatrove_pipeline(
-        data_dir, output_dir, batch_size, limit, logger
-    )
+    pipeline = create_custom_pipeline(data_dir, output_dir, batch_size, limit, logger)
 
     # 配置executor
-    executor = LocalPipelineExecutor(
+    executor = create_local_executor(
         pipeline=pipeline,
         workers=workers,
         logging_dir=os.path.join(output_dir, "logs"),
@@ -496,7 +448,7 @@ def save_final_results(
         output_dir: 输出目录
         logger: 日志记录器
     """
-    results_file = os.path.join(output_dir, "results", "exp_001_full_statistics.json")
+    results_file = os.path.join(output_dir, "results", "fineweb_full_statistics.json")
 
     try:
         with open(results_file, "w", encoding="utf-8") as f:
@@ -516,56 +468,134 @@ def main() -> None:
     parser = create_parser()
     args = parser.parse_args()
 
+    # 加载配置文件
+    config = {}
+    if os.path.exists(args.config):
+        config = load_config(args.config)
+
+    # 合并配置：命令行参数覆盖配置文件
+    # 支持嵌套配置结构（如config.data.path）和扁平结构
+    data_dir = args.data_dir
+    if data_dir is None:
+        # 尝试从嵌套结构读取
+        if "data" in config and isinstance(config["data"], dict):
+            data_dir = config["data"].get(
+                "path", "data/datasets/HuggingFaceFW/fineweb-edu/data"
+            )
+        else:
+            data_dir = config.get(
+                "data_dir", "data/datasets/HuggingFaceFW/fineweb-edu/data"
+            )
+
+    output_dir = args.output_dir
+    if output_dir is None:
+        if "output" in config and isinstance(config["output"], dict):
+            output_dir = config["output"].get("dir", "outputs")
+        else:
+            output_dir = config.get("output_dir", "outputs")
+
+    workers = args.workers
+    if workers is None:
+        if "processing" in config and isinstance(config["processing"], dict):
+            workers = config["processing"].get("workers", 8)
+        else:
+            workers = config.get("workers", 8)
+
+    batch_size = args.batch_size
+    if batch_size is None:
+        if "data" in config and isinstance(config["data"], dict):
+            batch_size = config["data"].get("batch_size", 5000)
+        else:
+            batch_size = config.get("batch_size", 5000)
+
+    log_level = args.log_level
+    if log_level is None:
+        if "output" in config and isinstance(config["output"], dict):
+            log_level = config["output"].get("log_level", "INFO")
+        else:
+            log_level = config.get("log_level", "INFO")
+
+    limit = args.limit
+    if limit is None:
+        if "processing" in config and isinstance(config["processing"], dict):
+            limit = config["processing"].get("limit", None)
+        else:
+            limit = config.get("limit", None)
+
+    # Dry run模式
+    if args.dry_run:
+        print("\n" + "=" * 60)
+        print("  Dry run模式 - 配置信息")
+        print("=" * 60)
+        print(f"  配置文件: {args.config}")
+        print(f"  数据目录: {data_dir}")
+        print(f"  输出目录: {output_dir}")
+        print(f"  Worker数量: {workers}")
+        print(f"  批量大小: {batch_size}")
+        print(f"  处理限制: {limit if limit else '全量'}")
+        print(f"  日志级别: {log_level}")
+        print("=" * 60)
+        print("  Dry run: pipeline would be executed")
+        print("=" * 60 + "\n")
+        return
+
     # 设置输出目录
-    dirs = setup_output_directories(args.output_dir)
+    dirs = setup_output_directories(output_dir)
 
     # 设置日志
     timestamp = get_timestamp()
-    log_file = os.path.join(dirs["logs"], f"exp_001_{timestamp}.log")
-    logger = setup_logging(log_file, args.log_level)
+    log_file = os.path.join(dirs["logs"], f"fineweb_explore_{timestamp}.log")
+    logger = setup_logging("fineweb_explore", log_level, log_file)
 
     # 记录开始时间
     start_time = datetime.now().isoformat()
     logger.info("开始执行 FineWeb-Edu 数据集探索（datatrove优化版）")
-    logger.info(f"参数: {vars(args)}")
+    logger.info(f"配置文件: {args.config}")
+    logger.info(f"数据目录: {data_dir}")
+    logger.info(f"输出目录: {output_dir}")
+    logger.info(f"Worker数量: {workers}")
+    logger.info(f"批量大小: {batch_size}")
+    logger.info(f"处理限制: {limit if limit else '全量'}")
+    logger.info(f"日志级别: {log_level}")
 
     # 打印配置信息
     print("\n" + "=" * 60)
-    print("  实验 001: FineWeb-Edu 数据集探索（datatrove优化版）")
+    print("  FineWeb-Edu 数据集探索（datatrove优化版）")
     print("=" * 60)
-    print(f"  数据目录: {args.data_dir}")
-    print(f"  输出目录: {args.output_dir}")
-    print(f"  Worker数量: {args.workers}")
-    print(f"  批量大小: {args.batch_size}")
-    print(f"  处理限制: {args.limit if args.limit else '全量'}")
-    print(f"  日志级别: {args.log_level}")
+    print(f"  配置文件: {args.config}")
+    print(f"  数据目录: {data_dir}")
+    print(f"  输出目录: {output_dir}")
+    print(f"  Worker数量: {workers}")
+    print(f"  批量大小: {batch_size}")
+    print(f"  处理限制: {limit if limit else '全量'}")
+    print(f"  日志级别: {log_level}")
     print(f"  开始时间: {start_time}")
     print("=" * 60)
 
     try:
         # 1. 运行datatrove pipeline
         run_pipeline(
-            data_dir=args.data_dir,
-            output_dir=args.output_dir,
-            workers=args.workers,
-            batch_size=args.batch_size,
-            limit=args.limit,
+            data_dir=data_dir,
+            output_dir=output_dir,
+            workers=workers,
+            batch_size=batch_size,
+            limit=limit,
             logger=logger,
         )
 
         # 2. 聚合结果
         end_time = datetime.now().isoformat()
-        results = aggregate_results(args.output_dir, start_time, end_time, logger)
+        results = aggregate_results(output_dir, start_time, end_time, logger)
 
         # 3. 保存最终结果
-        save_final_results(results, args.output_dir, logger)
+        save_final_results(results, output_dir, logger)
 
         # 4. 打印总结
         print("\n" + "=" * 60)
         print("  总结")
         print("=" * 60)
         print("  ✅ 数据集探索完成")
-        print(f"  ✅ 结果文件: {args.output_dir}/results/exp_001_full_statistics.json")
+        print(f"  ✅ 结果文件: {output_dir}/results/fineweb_full_statistics.json")
         print(f"  ✅ 日志文件: {log_file}")
         print(f"  ✅ 结束时间: {end_time}")
         print("=" * 60 + "\n")

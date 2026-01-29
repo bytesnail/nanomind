@@ -7,7 +7,7 @@
 - 将统计结果保存到文件系统
 
 运行命令：
-    python experiments/exp_002_custom_stats.py
+    python experiments/fineweb_stats_collector.py
 
 输出：
 - 每个worker的独立统计文件
@@ -17,12 +17,10 @@
 
 # 标准库
 import json
-import os
 import numpy as np
 from typing import Dict, Any, List, Optional, Generator
 from collections import Counter
 from urllib.parse import urlparse
-from pathlib import Path
 
 # DataTrove
 from datatrove.pipeline.base import PipelineStep
@@ -32,6 +30,41 @@ from datatrove.io import DataFolder, get_datafolder
 # 辅助类型定义
 StatsDict = Dict[str, Any]
 DocumentGenerator = Generator[Document, None, None]
+
+
+def compute_score_stats(scores: List[float], total_docs: int = 0) -> Dict[str, Any]:
+    """计算score的统计信息（mean, median, std, min, max, percentiles）。
+
+    Args:
+        scores: score值列表
+        total_docs: 总文档数（默认0）
+
+    Returns:
+        包含score统计信息的字典，包括mean, median, std, min, max,
+        percentiles和total_docs
+    """
+    if not scores:
+        return {"total_docs": total_docs, "all_scores": []}
+
+    scores_array = np.array(scores)
+    result = {
+        "mean": float(np.mean(scores_array)),
+        "median": float(np.median(scores_array)),
+        "std": float(np.std(scores_array)),
+        "min": float(np.min(scores_array)),
+        "max": float(np.max(scores_array)),
+        "percentiles": {},
+        "total_docs": total_docs,
+        "all_scores": scores,
+    }
+
+    # 计算分位数
+    for i in range(1, 11):
+        percentile = i * 10
+        value = float(np.percentile(scores_array, percentile))
+        result["percentiles"][f"{percentile}%"] = value
+
+    return result
 
 
 def extract_domain(url: str) -> str:
@@ -120,25 +153,14 @@ def aggregate_worker_stats(
                 "file_count": snapshot_dict.get(file_key, 0),
             }
 
-    # 计算score统计
+    # 计算score统计（使用统一的函数）
     scores = aggregated["score_stats"]["scores"]
+    total_docs = aggregated["score_stats"]["total_docs"]
     if scores:
-        scores_array = np.array(scores)
-        final_result["score_stats"] = {
-            "mean": float(np.mean(scores_array)),
-            "median": float(np.median(scores_array)),
-            "std": float(np.std(scores_array)),
-            "min": float(np.min(scores_array)),
-            "max": float(np.max(scores_array)),
-            "percentiles": {},
-            "total_docs": aggregated["score_stats"]["total_docs"],
-        }
-
-        # 计算分位数
-        for i in range(1, 11):
-            percentile = i * 10
-            value = float(np.percentile(scores_array, percentile))
-            final_result["score_stats"]["percentiles"][f"{percentile}%"] = value
+        score_stats = compute_score_stats(scores, total_docs)
+        # 聚合时不需要保存all_scores
+        score_stats.pop("all_scores", None)
+        final_result["score_stats"] = score_stats
 
     return final_result
 
@@ -159,26 +181,26 @@ class FinewebEduStatsCollector(PipelineStep):
     name = "📊 FinewebEduStatsCollector"
     type = "STATS_COLLECTOR"
 
-    def __init__(self, output_folder: str):
+    def __init__(self, output_folder: str) -> None:
         """初始化统计收集器。
 
         Args:
             output_folder: 统计结果输出目录
         """
         super().__init__()
-        self.output_folder = output_folder
-        self.data_folder = get_datafolder(output_folder)
+        self.output_folder: str = output_folder
+        self.data_folder: DataFolder = get_datafolder(output_folder)
 
         # 每个worker的独立统计状态
         self.domain_counter: Counter = Counter()
-        self.snapshot_stats: Dict[str, Dict[str, int]] = {}
+        self.snapshot_stats: Dict[str, Dict[str, Any]] = {}
         self.scores: List[float] = []
         self.int_score_counter: Counter = Counter()
         self.total_docs: int = 0
 
     def run(
-        self, data: DocumentsPipeline, rank: int = 0, world_size: int = 1
-    ) -> DocumentGenerator:
+        self, data: Any, rank: int = 0, world_size: int = 1
+    ) -> Generator[Document, None, None]:
         """执行统计收集的流水线步骤。
 
         Args:
@@ -251,35 +273,16 @@ class FinewebEduStatsCollector(PipelineStep):
         Args:
             rank: 当前worker的rank
         """
-        # 计算score统计
-        score_stats = {}
-        if self.scores:
-            scores_array = np.array(self.scores)
-            score_stats = {
-                "mean": float(np.mean(scores_array)),
-                "median": float(np.median(scores_array)),
-                "std": float(np.std(scores_array)),
-                "min": float(np.min(scores_array)),
-                "max": float(np.max(scores_array)),
-                "percentiles": {},
-                "total_docs": self.total_docs,
-                "all_scores": self.scores,  # 保存所有score用于聚合
-            }
-
-            # 计算分位数
-            for i in range(1, 11):
-                percentile = i * 10
-                value = float(np.percentile(scores_array, percentile))
-                score_stats["percentiles"][f"{percentile}%"] = value
-        else:
-            score_stats = {"total_docs": self.total_docs, "all_scores": []}
+        # 计算score统计（使用统一的函数）
+        score_stats = compute_score_stats(self.scores, self.total_docs)
 
         # 整理快照统计格式
-        snapshot_stats_final = {}
+        snapshot_stats_final: Dict[str, Dict[str, Any]] = {}
         for snapshot_name, snapshot_info in self.snapshot_stats.items():
+            files = snapshot_info.get("files", set())
             snapshot_stats_final[snapshot_name] = {
                 "doc_count": snapshot_info["doc_count"],
-                "file_count": len(snapshot_info["files"]),
+                "file_count": len(files),
             }
 
         # 组装最终的统计结果
@@ -317,7 +320,7 @@ class FinewebEduStatsCollector(PipelineStep):
         if not data_folder.isdir(stats_dir):
             return None
 
-        stats_files = []
+        stats_files: List[str] = []
         for file_path in data_folder.list_files(stats_dir):
             if file_path.endswith(".json"):
                 stats_files.append(file_path)
@@ -326,7 +329,7 @@ class FinewebEduStatsCollector(PipelineStep):
             return None
 
         # 构建完整的文件路径列表
-        full_stats_files = []
+        full_stats_files: List[str] = []
         for file_path in stats_files:
             # 直接使用相对路径，因为DataFolder会正确处理
             full_stats_files.append(file_path)
@@ -346,7 +349,7 @@ class FinewebEduStatsCollector(PipelineStep):
 
 
 # 示例使用函数
-def demo_usage():
+def demo_usage() -> None:
     """演示如何使用 FinewebEduStatsCollector 的示例函数。"""
     from datatrove.pipeline.readers import JsonlReader
     from datatrove.executor.local import LocalPipelineExecutor
