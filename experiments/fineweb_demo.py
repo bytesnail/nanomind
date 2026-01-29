@@ -68,6 +68,7 @@ def run_fineweb_stats_collection() -> bool:
         pipeline=pipeline,
         workers=1,
         logging_dir=f"{output_dir}/logs",
+        skip_completed=False,  # 每次都重新处理，不使用缓存
     )
 
     try:
