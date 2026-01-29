@@ -322,7 +322,8 @@ class FinewebEduStatsCollector(PipelineStep):
 
         stats_files: List[str] = []
         for file_path in data_folder.list_files(stats_dir):
-            if file_path.endswith(".json"):
+            # 只读取worker统计文件，排除聚合结果文件
+            if file_path.endswith(".json") and "worker_" in file_path:
                 stats_files.append(file_path)
 
         if not stats_files:
