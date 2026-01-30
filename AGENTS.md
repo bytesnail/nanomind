@@ -9,6 +9,8 @@
 2. **可复现性优先**
 3. **实验文档化**
 4. **模块化设计**
+5. **实用主义优于过度工程化**
+6. **配置管理清晰化** - 使用 argparse + dataclass 而非硬编码
 
 ---
 
@@ -23,13 +25,28 @@
 - **DO**: 类型提示、docstrings、绝对导入、固定随机种子
 - **DON'T**: 不硬编码配置、不使用 `import *`
 
+### AI 代理工作模式
+- **DO**: 自主决策和执行本项目的操作（无需等待交互授权）
+- **DO**: 直接执行符合项目原则的修改
+- **DON'T**: 为简单操作等待用户确认（如修复 lint 错误、运行测试等）
+- **DON'T**: 因等待交互而中断工作流程
+- **NOTE**: 仅针对本项目目录下的操作无需等待交互授权
+
 ### PyTorch
 - **DO**: `get_device()`、`model.train()`/`model.eval()`、`torch.no_grad()`
 - **DON'T**: 不手动管理设备、推理时不禁用梯度
 
 ### 实验
-- **DO**: `experiments/` 目录、配置文件、`outputs/` 记录、`exp:` 提交
-- **DON'T**: 不硬编码超参数、不提交检查点
+- **DO**:
+  - 使用 `experiments/` 目录存放实验脚本
+  - 使用 `argparse` + dataclass 管理实验配置
+  - 使用 `--help` 查看参数说明
+  - 使用 `outputs/` 记录实验结果
+  - 使用 `exp:` 前缀提交实验相关代码
+- **DON'T**:
+  - 不硬编码超参数到代码中
+  - 不提交模型检查点（outputs/ 下的 .pth 文件）
+  - 不提交大型数据集文件
 
 ---
 
@@ -55,74 +72,35 @@ python experiments/exp_000_environment_check.py
 
 ### 开发
 ```bash
-python experiments/exp_001_baseline.py
+# 查看实验参数
+python experiments/exp_001_datasets_stats.py --help
+
+# 运行实验
+python experiments/exp_001_datasets_stats.py explore --dataset <name> --data-dir <path> --workers 8
+
+# 代码工具
 uv add <package> --no-sync
 black .
 ruff check .
 ```
 
----
-
-## 代码模式
-
-```python
-# ✅ GOOD: 类型提示 + docstring
-def train_model(
-    model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    epochs: int = 10
-) -> Dict[str, float]:
-    """训练模型并返回指标。"""
-    set_seed(42)
-    return {"loss": 0.123, "accuracy": 0.956}
-
-# 🚫 BAD
-def train_model(model, dataloader):
-    torch.manual_seed(42)
-    return 0.123
-
-# ✅ GOOD: 自动选择设备
-def get_device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# 🚫 BAD: 手动管理设备
-if torch.cuda.is_available():
-    model = model.cuda()
-
-# ✅ GOOD: 正确的模型模式
-model.train()
-for epoch in range(epochs):
-    pass
-model.eval()
-with torch.no_grad():
-    pass
-
-# 🚫 BAD: 忘记切换模式
-
-# ✅ GOOD: 使用配置文件
-def load_config(config_path: str) -> Dict[str, Any]:
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-config = load_config('configs/exp_001.yaml')
-
-# 🚫 BAD: 硬编码超参数
-learning_rate = 0.001
+### Git 提交规范
+```bash
+# 使用前缀标识提交类型
+git commit -m "exp: add new experiment"
+git commit -m "fix: correct device handling"
 ```
 
 ---
 
-## 技术栈
+## 代码模式快速参考
 
-| 组件 | 版本 |
-|------|------|
-| Python | 3.12.12 |
-| PyTorch | 2.10.0+cu128 |
-| CUDA | 12.8 |
-| Transformers | 5.0.0 |
-| Datasets | 4.5.0 |
-| Torchvision | 0.25.0+cu128 |
-
-详细规格：[docs/environment/specs.md](docs/environment/specs.md)
+**核心要点**：
+- 类型提示 + docstring → [代码风格](docs/development/code-style.md)
+- 使用 `get_device()` 自动选择设备 → [最佳实践](docs/development/best-practices.md)
+- `model.train()` / `model.eval()` 切换模式
+- 推理时使用 `torch.no_grad()` 禁用梯度
+- 使用 `argparse` + `dataclass` 管理配置 → [实验管理](docs/experiments/management.md)
 
 ---
 
@@ -137,11 +115,4 @@ learning_rate = 0.001
 - [Git 工作流](docs/development/git-workflow.md)
 - [开始实验](docs/experiments/getting-started.md)
 - [实验管理](docs/experiments/management.md)
-- [项目结构](docs/experiments/project-structure.md)
-
----
-
-## 相关文档
-
-- [README.md](README.md) - 项目简介和快速开始
-- [docs/](docs/) - 详细文档目录
+- [项目 README](README.md)
