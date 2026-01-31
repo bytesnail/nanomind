@@ -681,7 +681,9 @@ rpds-py==0.30.0
 rsa==4.9.1
     # via google-auth
 ruff==0.14.14
-    # via datatrove
+    # via
+    #   nanomind (pyproject.toml)
+    #   datatrove
 s3fs==2025.10.0
     # via datatrove
 s3transfer==0.15.0
