@@ -10,6 +10,7 @@
 
 ```bash
 # 创建必要的目录
+# 注意：以下目录结构用于传统训练实验，当前项目主要使用 Datatrove 进行数据处理
 mkdir -p models data training utils configs experiments outputs/{checkpoints,logs,results}
 ```
 
@@ -34,13 +35,13 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
-from experiments.utils import setup_logger, setup_experiment_paths
+from experiments.utils import setup_logging, setup_experiment_paths
 
 # 设置实验路径
 setup_experiment_paths(__file__)
 
 # 设置日志
-logger = setup_logger(__name__)
+logger = setup_logging(__name__)
 
 def main() -> None:
     """运行实验。"""
@@ -90,7 +91,7 @@ if __name__ == '__main__':
 
 ### 传统训练实验模板（参考）
 
-如果需要创建传统模型训练实验，可以参考以下模板（需要先创建 models/、training/ 等模块）：
+> **注意**：以下模板用于传统模型训练实验。当前项目主要使用 Datatrove 进行数据处理，如需创建传统训练实验，请先创建相应的 models/、training/ 等模块。
 
 ```python
 """实验 003: 模型训练（通用模板）
@@ -195,7 +196,24 @@ train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 ### Cell 3: 定义模型
 
 ```python
-from models import SimpleModel
+# 注意：SimpleModel 需要预先在 models/ 模块中定义
+# 以下是示例代码，实际使用时需要创建对应的模型类
+# from models import SimpleModel
+
+# 示例模型定义（使用 PyTorch 原生模块）
+import torch
+import torch.nn as nn
+
+class SimpleModel(nn.Module):
+    def __init__(self, input_size=784, hidden_size=128, output_size=10):
+        super().__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
 
 # 创建模型
 model = SimpleModel(input_size=784, hidden_size=128, output_size=10)

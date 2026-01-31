@@ -384,8 +384,9 @@ git commit -m "exp: 添加实验 001 - 数据集统计"
 ### 4. 实验文档
 
 当前项目的实验记录：
-- `exp_000`: 环境验证（参见 docs/experiments/fineweb_stats.md）
-- `exp_001`: 数据集统计（参见 docs/experiments/fineweb_stats.md）
+- `exp_000`: 环境验证（参见 [docs/environment/verification.md](../environment/verification.md)）
+- `exp_001`: 数据集统计（参见 [docs/experiments/exp-001-overview.md](exp-001-overview.md)）
+  - FineWeb-Edu 详细分析（参见 [docs/experiments/fineweb_stats.md](fineweb_stats.md)）
 
 **建议创建** `experiments/README.md` 记录实验历史：
 

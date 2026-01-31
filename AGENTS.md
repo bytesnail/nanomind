@@ -80,8 +80,6 @@
 conda activate nanomind
 uv pip install -r requirements.txt
 python -m experiments.000
-# 或
-python -m experiments.000
 ```
 
 ### 开发

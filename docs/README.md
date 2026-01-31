@@ -220,7 +220,6 @@ python -m experiments.001 2>&1 | tee outputs/logs/exp_001.log
 
 ## 相关资源
 
-- [GitHub Repository](https://github.com/your-repo/nanomind)
 - [PyTorch Documentation](https://pytorch.org/docs/stable/)
 - [Transformers Documentation](https://huggingface.co/docs/transformers/)
 - [DataTrove Documentation](https://github.com/huggingface/datatrove)

@@ -40,8 +40,6 @@ uv pip install -r requirements.txt
 
 # 4. 验证环境配置
 python -m experiments.000
-# 或
-python -m experiments.000
 ```
 
 > 📚 **详细的环境初始化和依赖管理说明**请参考：[docs/environment/setup.md](docs/environment/setup.md)
@@ -65,7 +63,7 @@ python -m experiments.000
 - [AGENTS.md](AGENTS.md) - 开发指南核心
 - [docs/environment/](docs/environment/) - 环境管理（setup, dependencies, verification, specs）
 - [docs/development/](docs/development/) - 开发规范（code-style, best-practices, debugging, git-workflow）
-- [docs/experiments/](docs/experiments/) - 实验管理（getting-started, management, project-structure, exp-001-overview）
+- [docs/experiments/](docs/experiments/) - 实验管理（getting-started, management, project-structure, exp-001-overview, fineweb_stats）
 
 ---
 

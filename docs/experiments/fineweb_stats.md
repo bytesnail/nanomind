@@ -4,23 +4,27 @@
 
 FineWeb-Edu 统计实验提供了对 HuggingFaceFW/fineweb-edu 数据集的完整分析和统计收集功能。该实验使用 DataTrove 框架进行高效的数据处理，支持多 worker 并发处理和结果聚合。
 
+> **注意**：FineWeb-Edu 统计功能已整合到 `exp_001` 数据集统计实验中。本文档详细介绍 FineWeb-Edu 数据集的统计分析和结果解读。完整的实验说明请参考 [exp-001 概览](exp-001-overview.md)。
+
 ## 项目结构
 
-### 核心文件
+### 实验文件（exp_001）
+
+FineWeb-Edu 统计作为 exp_001 的一个支持数据集，使用以下文件：
 
 ```
-experiments/
-├── fineweb_explore.py          # 主探索脚本（datatrove 优化版）
-├── fineweb_stats_collector.py  # 自定义统计收集器 PipelineStep
-├── fineweb_demo.py              # 快速演示脚本（100个文档）
-└── run_fineweb.py               # 统一命令行入口
+experiments/001/
+├── exp_001_datasets_stats.py    # 主实验脚本
+├── cli.py                        # 命令行接口
+├── config.py                     # 数据集配置（包含 fineweb-edu 配置）
+├── pipeline.py                   # Datatrove 处理流水线
+├── collector.py                  # 统计收集器
+└── stats_utils.py                # 统计工具函数
 
-configs/
-├── fineweb.yaml                 # 完整探索配置
-└── fineweb_quick.yaml           # 快速统计配置
-
-tests/experiments/
-└── test_fineweb_stats.py        # 统计收集器测试
+experiments/utils/
+├── common.py                     # 通用工具（日志、格式化等）
+├── paths.py                      # 路径处理
+└── constants.py                 # 常量定义
 ```
 
 ### 输出结构
@@ -58,139 +62,83 @@ outputs/
 - **score 分布**: mean、median、std、min、max、分位数
 - **int_score 分布**: 计数分布
 
-### 3. 统一命令行入口 (run_fineweb.py)
+### 3. 命令行接口
 
-提供统一的命令行接口，支持以下子命令：
+实验使用 `python -m experiments.001` 命令运行，支持以下参数：
 
-- `explore`: 完整数据集探索
-- `quick`: 快速统计（限制文档数）
-- `demo`: 运行演示（100 个文档）
-- `test`: 运行测试
+- `--dataset`: 指定数据集名称（如 `HuggingFaceFW/fineweb-edu`）
+- `--data-dir`: 数据目录（默认从配置读取）
+- `--workers`: Worker 数量（默认 8）
+- `--batch-size`: 批量大小（默认 5000）
+- `--limit`: 限制处理的文档数（可选）
+- `--verbose`: 详细输出模式（可选）
 
 ## 使用方法
 
-### 完整数据集探索
+### 运行 FineWeb-Edu 统计
 
 ```bash
-# 使用默认配置
-python experiments/run_fineweb.py explore
+# 完整数据集统计
+python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8
 
-# 指定配置文件
-python experiments/run_fineweb.py explore --config configs/fineweb.yaml
+# 快速统计（限制文档数）
+python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8 --limit 10000
 
-# 自定义参数
-python experiments/run_fineweb.py explore --workers 16 --batch-size 10000
+# 详细输出模式
+python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8 --verbose
 ```
 
-### 快速统计
+### 查看帮助
 
 ```bash
-# 使用默认配置（限制 10000 个文档）
-python experiments/run_fineweb.py quick
-
-# 自定义限制文档数
-python experiments/run_fineweb.py quick --limit 5000
+python -m experiments.001 --help
 ```
 
-### 运行演示
-
-```bash
-# 快速演示（处理 100 个文档）
-python experiments/run_fineweb.py demo
-```
-
-### 运行测试
-
-```bash
-# 运行所有测试
-python experiments/run_fineweb.py test
-
-# 详细输出
-python experiments/run_fineweb.py test -- -v
-```
-
-### 直接调用脚本
-
-```bash
-# 直接调用探索脚本
-python experiments/fineweb_explore.py --config configs/fineweb.yaml
-
-# 直接调用演示脚本
-python experiments/fineweb_demo.py
-```
 
 ## 配置说明
 
-### 完整探索配置 (configs/fineweb.yaml)
+FineWeb-Edu 数据集配置存储在 `experiments/001/config.py` 中：
 
-```yaml
-# 数据路径和批处理
-data:
-  path: "data/datasets/HuggingFaceFW/fineweb-edu/data"
-  batch_size: 5000
+```python
+@dataclass
+class DatasetConfig:
+    """数据集配置类。"""
+    name: str
+    path: str
+    text_key: str = "text"
+    id_key: Optional[str] = "id"
+    group_field: Optional[str] = None
+    score_field: Optional[str] = "score"
+    int_score_field: Optional[str] = None
+    glob_pattern: str = "**/*.parquet"
 
-# 处理配置
-processing:
-  workers: 8
-  limit: null  # null 表示全量处理
-
-# 输出配置
-output:
-  dir: "outputs/fineweb"
-  log_level: "INFO"
-
-# 统计收集选项
-stats:
-  collect_domain: true
-  collect_score: true
-  collect_int_score: true
-  collect_snapshot: true
-  include_doc_stats: true
-  include_lang_stats: true
-```
-
-### 快速统计配置 (configs/fineweb_quick.yaml)
-
-```yaml
-# 数据路径和批处理
-data:
-  path: "data/datasets/HuggingFaceFW/fineweb-edu/data"
-  batch_size: 1000
-
-# 处理配置
-processing:
-  workers: 2
-  limit: 10000  # 仅处理 10k 文档
-
-# 输出配置
-output:
-  dir: "outputs/fineweb_quick"
-  log_level: "INFO"
-
-# 统计收集选项
-stats:
-  collect_domain: true
-  collect_score: true
-  collect_int_score: false
-  collect_snapshot: false
-  include_doc_stats: true
-  include_lang_stats: true
+DATASET_CONFIGS = {
+    "HuggingFaceFW/fineweb-edu": DatasetConfig(
+        name="HuggingFaceFW/fineweb-edu",
+        path="data/datasets/HuggingFaceFW/fineweb-edu/data/",
+        text_key="text",
+        id_key="id",
+        group_field="dump",
+        score_field="score",
+        int_score_field="int_score",
+        glob_pattern="**/*.parquet",
+    ),
+    # ... 其他数据集配置
+}
 ```
 
 ## 命令行参数
 
-### 全局参数
+主要参数：
 
-- `--config`: 配置文件路径（默认: `configs/fineweb.yaml`）
-- `--verbose`, `-v`: 详细输出模式（DEBUG 日志级别）
-- `--dry-run`: 演示模式，仅打印配置不实际执行
-
-### explore 子命令参数
-
-- `--data-dir`: 数据集路径（默认: 从配置文件读取）
-- `--output-dir`: 输出目录（默认: 从配置文件读取）
-- `--workers`: 并行 worker 数量（默认: 从配置文件读取）
-- `--batch-size`: 批量大小（默认: 从配置文件读取）
+- `--dataset`: 数据集名称（必需），如 `HuggingFaceFW/fineweb-edu`
+- `--data-dir`: 数据目录（可选，默认从配置读取）
+- `--output-dir`: 输出目录（可选，默认 `outputs/exp_001_datasets_stats`）
+- `--workers`: 并行 worker 数量（默认 8）
+- `--batch-size`: 批量大小（默认 5000）
+- `--limit`: 限制处理的文档数（可选）
+- `--verbose`, `-v`: 详细输出模式（可选）
+- `--dry-run`: 演示模式，仅打印配置不实际执行（可选）
 - `--log-level`: 日志级别（默认: 从配置文件读取）
 
 ### quick 子命令参数
@@ -321,21 +269,22 @@ pytest tests/experiments/test_fineweb_stats.py --cov
 
 ```bash
 # 使用详细日志
-python experiments/run_fineweb.py explore --verbose
+python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8 --verbose
 
 # 使用 dry run 查看配置
-python experiments/run_fineweb.py explore --dry-run
+python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --dry-run
 
-# 运行测试验证功能
-python experiments/run_fineweb.py test
+# 查看帮助信息
+python -m experiments.001 --help
 ```
 
 ## 相关文档
 
-- [项目文档](README.md)
-- [环境初始化](../environment/setup.md)
-- [实验管理](management.md)
-- [项目结构](project-structure.md)
+- [exp-001 概览](exp-001-overview.md) - 数据集统计实验完整说明
+- [项目结构](project-structure.md) - 实验目录组织
+- [实验管理](management.md) - 实验追踪和对比
+- [环境初始化](../environment/setup.md) - 配置开发环境
+- [开始实验](getting-started.md) - 创建新实验
 
 ## 版本历史
 

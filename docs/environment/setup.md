@@ -46,7 +46,7 @@ conda create -n nanomind python=3.12 -y
 conda activate nanomind
 
 # 验证 Python 版本
-python --version  # 应该输出 Python 3.12.12
+python --version  # 应该输出 Python 3.12.x
 ```
 
 ### 2. 安装 uv

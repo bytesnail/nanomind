@@ -49,7 +49,7 @@ python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
 
 ```bash
 # 检查 Python 版本
-python --version  # 应该输出 Python 3.12.12
+python --version  # 应该输出 Python 3.12.x
 
 # 检查 Python 路径
 which python
@@ -163,10 +163,10 @@ python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
    - GPU 信息（如果有）
 
 2. **软件版本**
-   - Python 版本
-   - PyTorch 版本
-   - CUDA 版本
-   - cuDNN 版本
+    - Python 版本 (应为 3.12.x)
+    - PyTorch 版本
+    - CUDA 版本
+    - cuDNN 版本
 
 3. **功能测试**
    - 张量创建和运算
@@ -183,11 +183,11 @@ python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
   内存: 251.59 GB
   GPU: 2x NVIDIA GeForce RTX 2080 Ti
 
-软件版本:
-  Python: 3.12.12
-  PyTorch: 2.10.0+cu128
-  CUDA: 12.8
-  cuDNN: 9.10.2
+ 软件版本:
+   Python: 3.12.x
+   PyTorch: 2.10.0+cu128
+   CUDA: 12.8
+   cuDNN: 9.10.2
 
 功能测试:
   ✓ 张量创建和运算
@@ -280,7 +280,7 @@ python -c "import torch; torch.cuda.empty_cache()"
 
 完成以下检查项以确保环境配置正确：
 
-- [ ] Python 版本为 3.12.12
+ - [ ] Python 版本为 3.12.x
 - [ ] PyTorch 版本为 2.10.0+cu128
 - [ ] Transformers 版本为 5.0.0
 - [ ] Datasets 版本为 4.5.0

@@ -350,7 +350,7 @@ Score 统计:
 - [项目结构](project-structure.md) - 实验目录组织
 - [实验管理](management.md) - 实验追踪和对比
 - [开始实验](getting-started.md) - 创建新实验
-- [Fineweb 统计实验](fineweb_stats.md) - 详细的 Fineweb 统计分析
+- [FineWeb 统计实验](fineweb_stats.md) - FineWeb-Edu 数据集详细分析和统计结果
 
 ---
 

@@ -166,7 +166,7 @@ from transformers import AutoModel, AutoTokenizer
 from datatrove.pipeline.base import PipelineStep
 
 # 3. 本地模块
-from experiments.utils import setup_logger, setup_experiment_paths
+from experiments.utils import setup_logging, setup_experiment_paths
 from experiments.utils.paths import project_root
 from .config import DATASET_CONFIGS
 ```
@@ -243,26 +243,26 @@ experiments/
 
 将常用工具函数放在 `experiments/utils/` 目录：
 
-```python
-# experiments/utils/common.py
-import logging
-from pathlib import Path
-from datatrove.pipeline.base import PipelineStep, DocumentsPipeline
-from typing import List, Optional, Dict, Any
+ ```python
+ # experiments/utils/common.py
+ import logging
+ from pathlib import Path
+ from datatrove.pipeline.base import PipelineStep, DocumentsPipeline
+ from typing import List, Optional, Dict, Any
 
-def setup_logger(name: str, verbose: bool = False) -> logging.Logger:
-    """设置日志记录器。"""
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-    # ... handler 设置
-    return logger
+ def setup_logging(exp_name: str, log_level: str = "INFO", log_file: Optional[str] = None) -> logging.Logger:
+     """设置日志记录器。"""
+     logger = logging.getLogger(exp_name)
+     logger.setLevel(getattr(logging, log_level.upper()))
+     # ... handler 设置
+     return logger
 
-def setup_experiment_paths(script_path: str) -> Dict[str, Path]:
-    """设置实验路径。"""
-    project_root = Path(script_path).parent.parent.parent
-    # ... 路径计算
-    return paths
-```
+ def setup_experiment_paths(script_path: str) -> Dict[str, Path]:
+     """设置实验路径。"""
+     project_root = Path(script_path).parent.parent.parent
+     # ... 路径计算
+     return paths
+ ```
 
 ---
 
