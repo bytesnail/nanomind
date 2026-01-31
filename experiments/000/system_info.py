@@ -3,15 +3,12 @@
 提供获取系统、CPU 和内存信息的函数。
 """
 
-import logging
 import os
 import platform
 import sys
 from typing import Dict, Any
 
 from experiments.utils.constants import MB_FACTOR
-
-logger = logging.getLogger(__name__)
 
 
 def get_system_info() -> Dict[str, Any]:
@@ -127,7 +124,7 @@ def _add_core_info(info: dict, core_info: dict) -> None:
 
 
 def _build_base_info(
-        cpu_model: str | None, cpu_freq: str | None, physical_ids: set
+    cpu_model: str | None, cpu_freq: str | None, physical_ids: set
 ) -> dict:
     """构建基础 CPU 信息字典。
 
@@ -147,7 +144,7 @@ def _build_base_info(
 
 
 def _build_cpu_info_dict(
-        cpu_model: str | None, cpu_freq: str | None, core_info: dict, physical_ids: set
+    cpu_model: str | None, cpu_freq: str | None, core_info: dict, physical_ids: set
 ) -> dict:
     """构建 CPU 信息字典。
 
@@ -182,7 +179,6 @@ def get_linux_cpu_info() -> Dict[str, Any]:
         core_info = _get_core_counts(cpuinfo)
         return _build_cpu_info_dict(cpu_model, cpu_freq, core_info, physical_ids)
     except (OSError, ValueError, IndexError) as e:
-        logger.debug(f"获取 CPU 信息失败: {e}", exc_info=True)
         return {"CPU 信息": "获取失败"}
 
 

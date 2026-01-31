@@ -5,7 +5,6 @@ from .common import (
     format_bytes,
     format_percent,
     get_timestamp,
-    setup_logging,
     create_datatrove_pipeline,
     create_local_executor,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "format_bytes",
     "format_percent",
     "get_timestamp",
-    "setup_logging",
     "create_datatrove_pipeline",
     "create_local_executor",
 ]

@@ -1,6 +1,5 @@
 """实验工具模块 - 通用函数。"""
 
-import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -30,7 +29,9 @@ def print_separator(char: str = "=", length: int = SEPARATOR_WIDTH) -> None:
     print(char * length)
 
 
-def print_section(title: str, subtitle: str = "", data: Dict[str, Any] = None) -> None:
+def print_section(
+    title: str, subtitle: str = "", data: Optional[Dict[str, Any]] = None
+) -> None:
     """打印带标题的部分。
 
     Args:
@@ -100,50 +101,12 @@ def get_timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def setup_logging(
-        exp_name: str,
-        log_level: str = "INFO",
-        log_file: Optional[str] = None,
-) -> logging.Logger:
-    """设置日志记录器。
-
-    Args:
-        exp_name: 实验名称，用作 logger 名称。
-        log_level: 日志级别（"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"）。
-        log_file: 日志文件路径，如果为 None 则不输出到文件。
-
-    Returns:
-        配置好的 logger 实例。
-    """
-    logger = logging.getLogger(exp_name)
-    logger.setLevel(getattr(logging, log_level.upper()))
-    logger.handlers.clear()
-
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    if log_file:
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(getattr(logging, log_level.upper()))
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
-
-    ch = logging.StreamHandler()
-    ch.setLevel(getattr(logging, log_level.upper()))
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-
-    return logger
-
-
 def create_datatrove_pipeline(
-        data_dir: str,
-        output_dir: str,
-        include_doc_stats: bool = True,
-        include_lang_stats: bool = True,
-        custom_step: Optional[PipelineStep] = None,
+    data_dir: str,
+    output_dir: str,
+    include_doc_stats: bool = True,
+    include_lang_stats: bool = True,
+    custom_step: Optional[PipelineStep] = None,
 ) -> List[PipelineStep]:
     """创建 datatrove 处理流水线。
 
@@ -190,10 +153,10 @@ def create_datatrove_pipeline(
 
 
 def create_local_executor(
-        pipeline: List[PipelineStep],
-        workers: int,
-        logging_dir: str,
-        skip_completed: bool = True,
+    pipeline: List[PipelineStep],
+    workers: int,
+    logging_dir: str,
+    skip_completed: bool = True,
 ) -> LocalPipelineExecutor:
     """创建本地 pipeline 执行器。
 
