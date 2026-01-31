@@ -11,13 +11,13 @@ from datatrove.io import DataFolder, get_datafolder
 from datatrove.pipeline.base import PipelineStep
 
 from config import DatasetConfig
-from stats_utils import (
-    aggregate_worker_stats,
-    compute_score_stats,
-)
 from io_utils import (
     _collect_numeric_field,
     _update_snapshot_stats,
+)
+from stats_utils import (
+    aggregate_worker_stats,
+    compute_score_stats,
 )
 
 StatsDict = Dict[str, Any]
@@ -47,7 +47,7 @@ class DatasetStatsCollector(PipelineStep):
         self.logger: logging.Logger = logging.getLogger(f"{self.name}")
 
     def run(
-        self, data: Any, rank: int = 0, world_size: int = 1
+            self, data: Any, rank: int = 0, world_size: int = 1
     ) -> Generator[Document, None, None]:
         """执行统计收集的流水线步骤。
 
@@ -132,7 +132,7 @@ class DatasetStatsCollector(PipelineStep):
 
     @staticmethod
     def aggregate_stats(
-        output_folder: str, config: DatasetConfig
+            output_folder: str, config: DatasetConfig
     ) -> Optional[StatsDict]:
         """聚合所有 worker 的统计结果。
 

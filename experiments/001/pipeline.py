@@ -7,17 +7,15 @@ from typing import Any, Callable, Dict, List, Optional
 from datatrove.pipeline.base import PipelineStep
 from datatrove.pipeline.readers import ParquetReader
 
-from config import DatasetConfig
 from collector import DatasetStatsCollector
-
+from config import DatasetConfig
 from experiments.utils.common import create_local_executor
 
 
 def parquet_to_doc_adapter(
-    config: DatasetConfig,
-    data: Dict[str, Any],
-    source_file: str,
-    id_in_file: int,
+        config: DatasetConfig,
+        data: Dict[str, Any],
+        source_file: str,
 ) -> Dict[str, Any]:
     """将 parquet 行转换为 Document 所需格式。
 
@@ -25,7 +23,6 @@ def parquet_to_doc_adapter(
         config: 数据集配置对象。
         data: parquet 行数据。
         source_file: 源文件路径。
-        id_in_file: 文件中的文档 ID。
 
     Returns:
         转换后的文档字典。
@@ -50,8 +47,8 @@ def parquet_to_doc_adapter(
 
 
 def create_adapter(
-    config: DatasetConfig,
-) -> Callable[[Any, Dict[str, Any], str, int], Dict[str, Any]]:
+        config: DatasetConfig,
+) -> Callable[[Dict[str, Any], str], Dict[str, Any]]:
     """创建配置好的适配器函数。
 
     Args:
@@ -62,19 +59,17 @@ def create_adapter(
     """
 
     def adapter(
-        reader: Any,
-        data: Dict[str, Any],
-        source_file: str,
-        id_in_file: int,
+            data: Dict[str, Any],
+            source_file: str,
     ) -> Dict[str, Any]:
         """适配器函数，调用 parquet_to_doc_adapter 进行转换。"""
-        return parquet_to_doc_adapter(config, data, source_file, id_in_file)
+        return parquet_to_doc_adapter(config, data, source_file)
 
     return adapter
 
 
 def create_stats_collector(
-    config: DatasetConfig, output_folder: str
+        config: DatasetConfig, output_folder: str
 ) -> DatasetStatsCollector:
     """创建配置好的统计收集器。
 
@@ -89,10 +84,10 @@ def create_stats_collector(
 
 
 def create_pipeline(
-    config: DatasetConfig,
-    output_dir: str,
-    batch_size: int,
-    limit: Optional[int],
+        config: DatasetConfig,
+        output_dir: str,
+        batch_size: int,
+        limit: Optional[int],
 ) -> List[PipelineStep]:
     """创建 datatrove 处理流水线。
 
@@ -126,12 +121,12 @@ def create_pipeline(
 
 
 def run_pipeline(
-    config: DatasetConfig,
-    output_dir: str,
-    workers: int,
-    batch_size: int,
-    limit: Optional[int],
-    logger: logging.Logger,
+        config: DatasetConfig,
+        output_dir: str,
+        workers: int,
+        batch_size: int,
+        limit: Optional[int],
+        logger: logging.Logger,
 ) -> None:
     """运行 datatrove pipeline。
 

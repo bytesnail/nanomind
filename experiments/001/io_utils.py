@@ -37,9 +37,9 @@ def resolve_nested_field(data: Dict[str, Any], field_path: str) -> Any:
 
 
 def _update_snapshot_stats(
-    snapshot_stats: Dict[str, Dict[str, Any]],
-    group_key: str,
-    file_name: Optional[str],
+        snapshot_stats: Dict[str, Dict[str, Any]],
+        group_key: str,
+        file_name: Optional[str],
 ) -> None:
     """更新快照统计信息。
 
@@ -56,10 +56,10 @@ def _update_snapshot_stats(
 
 
 def _collect_numeric_field(
-    data: Dict[str, Any],
-    field_path: Optional[str],
-    field_name: str,
-    logger: logging.Logger,
+        data: Dict[str, Any],
+        field_path: Optional[str],
+        field_name: str,
+        logger: logging.Logger,
 ) -> Optional[float]:
     """从文档数据中收集数值字段。
 
@@ -91,7 +91,7 @@ def _collect_numeric_field(
 
 
 def save_results(
-    results: Dict[str, Any], output_dir: str, logger: logging.Logger
+        results: Dict[str, Any], output_dir: str, logger: logging.Logger
 ) -> None:
     """保存最终统计结果。
 

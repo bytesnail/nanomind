@@ -45,7 +45,7 @@ StatsDict = Dict[str, Any]
 
 
 def _setup_dataset_logging(
-    config, dataset_output_dir: str, verbose: bool
+        config, dataset_output_dir: str, verbose: bool
 ) -> logging.Logger:
     """设置数据集日志。
 
@@ -84,7 +84,7 @@ def _print_dataset_info(config, dataset_output_dir: str) -> None:
 
 
 def _build_results_dict(
-    config, custom_stats: StatsDict, start_time: str, end_time: str
+        config, custom_stats: StatsDict, start_time: str, end_time: str
 ) -> Dict[str, Any]:
     """构建结果字典。
 
@@ -128,7 +128,7 @@ def _print_dry_run_summary(dataset_names: List[str]) -> None:
 
 
 def _process_single_dataset(
-    dataset_name: str, args: argparse.Namespace, dataset_output_dir: str
+        dataset_name: str, args: argparse.Namespace, dataset_output_dir: str
 ) -> None:
     """处理单个数据集。
 

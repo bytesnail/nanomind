@@ -9,7 +9,6 @@ from collections import Counter
 from typing import Any, Dict, List, Sequence
 
 import numpy as np
-
 from datatrove.io import DataFolder
 
 try:
@@ -71,7 +70,7 @@ def _initialize_aggregated_stats() -> Dict[str, Any]:
 
 
 def _process_worker_snapshot_stats(
-    aggregated: Dict[str, Any], worker_stats: Dict[str, Any]
+        aggregated: Dict[str, Any], worker_stats: Dict[str, Any]
 ) -> None:
     """处理单个worker的快照统计信息。
 
@@ -89,7 +88,7 @@ def _process_worker_snapshot_stats(
 
 
 def _process_worker_score_stats(
-    aggregated: Dict[str, Any], worker_stats: Dict[str, Any]
+        aggregated: Dict[str, Any], worker_stats: Dict[str, Any]
 ) -> None:
     """处理单个worker的分数统计信息。
 
@@ -103,7 +102,7 @@ def _process_worker_score_stats(
 
 
 def _process_worker_int_scores(
-    aggregated: Dict[str, Any], worker_stats: Dict[str, Any]
+        aggregated: Dict[str, Any], worker_stats: Dict[str, Any]
 ) -> None:
     """处理单个worker的整数分数分布。
 
@@ -160,7 +159,7 @@ def _finalize_score_stats(aggregated: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def aggregate_worker_stats(
-    data_folder: DataFolder, stats_files: Sequence[str]
+        data_folder: DataFolder, stats_files: Sequence[str]
 ) -> Dict[str, Any]:
     """聚合多个 worker 的统计结果。
 
