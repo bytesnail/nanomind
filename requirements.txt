@@ -51,6 +51,8 @@ babel==2.17.0
     # via
     #   courlan
     #   sphinx
+black==26.1.0
+    # via nanomind (pyproject.toml)
 blinker==1.9.0
     # via flask
 blis==1.3.3
@@ -90,6 +92,7 @@ charset-normalizer==3.4.4
     #   trafilatura
 click==8.3.1
     # via
+    #   black
     #   flask
     #   nltk
     #   ray
@@ -359,6 +362,8 @@ murmurhash==1.0.15
     #   preshed
     #   spacy
     #   thinc
+mypy-extensions==1.1.0
+    # via black
 namex==0.1.0
     # via keras
 networkx==3.6.1
@@ -463,6 +468,7 @@ orjson==3.11.5
     # via datatrove
 packaging==25.0
     # via
+    #   black
     #   datasets
     #   huggingface-hub
     #   keras
@@ -486,13 +492,17 @@ pandas==2.3.3
     #   pythainlp
 pathable==0.4.4
     # via jsonschema-path
+pathspec==1.0.4
+    # via black
 pillow==12.1.0
     # via
     #   matplotlib
     #   tensorboard
     #   torchvision
 platformdirs==4.5.1
-    # via virtualenv
+    # via
+    #   black
+    #   virtualenv
 pluggy==1.6.0
     # via pytest
 ply==3.11
@@ -596,6 +606,8 @@ python-dateutil==2.9.0.post0
     #   pandas
 python-magic==0.4.27
     # via datatrove
+pytokens==0.4.1
+    # via black
 pytz==2025.2
     # via
     #   dateparser
