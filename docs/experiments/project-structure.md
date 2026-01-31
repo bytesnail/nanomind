@@ -2,99 +2,130 @@
 
 ## 概述
 
-本指南介绍 nanomind 项目的目录结构、模块导入规范、配置管理和代码组织原则。
+本指南介绍 nanomind 项目的实际目录结构、模块导入规范、配置管理和代码组织原则。
 
 ---
 
-## 标准项目结构
+## 当前项目结构
 
 ```
 nanomind/
-├── README.md                 # 项目简介和快速开始
-├── AGENTS.md                 # 开发指南导航
-├── main.py                   # 入口点
-├── pyproject.toml            # 项目配置文件
-├── requirements.txt          # 依赖列表
-├── .python-version           # Python 版本（可选）
-├── .gitignore               # Git 忽略文件
+├── README.md                          # 项目简介和快速开始
+├── AGENTS.md                          # 开发指南导航
+├── main.py                           # 项目入口（当前仅打印信息）
+├── pyproject.toml                    # 项目配置文件
+├── requirements.txt                   # 依赖列表
+├── .python-version                    # Python 版本
+├── .gitignore                        # Git 忽略文件
 │
-├── models/                  # 模型架构定义
-│   ├── __init__.py
-│   ├── base_model.py        # 基础模型类
-│   ├── simple_model.py      # 简单模型
-│   └── transformer_model.py # Transformer 模型
+├── experiments/                      # 实验目录（核心）
+│   ├── 000/                         # 环境验证实验
+│   │   ├── exp_000_environment_check.py
+│   │   ├── system_info.py
+│   │   ├── torch_info.py
+│   │   ├── __init__.py
+│   │   └── __main__.py
+│   ├── 001/                         # 数据集统计实验
+│   │   ├── exp_001_datasets_stats.py
+│   │   ├── cli.py
+│   │   ├── config.py
+│   │   ├── pipeline.py
+│   │   ├── collector.py
+│   │   ├── stats_utils.py
+│   │   ├── io_utils.py
+│   │   ├── __init__.py
+│   │   └── __main__.py
+│   └── utils/                       # 实验工具模块
+│       ├── __init__.py
+│       ├── common.py
+│       ├── paths.py
+│       └── constants.py
 │
-├── data/                    # 数据加载和预处理
-│   ├── __init__.py
-│   ├── data_loader.py       # 数据加载器
-│   ├── dataset.py           # 数据集类
-│   └── preprocessing.py    # 数据预处理
+├── data/                             # 数据目录
+│   └── datasets/                    # 数据集存储
 │
-├── training/                # 训练循环和优化器
-│   ├── __init__.py
-│   ├── trainer.py           # 训练器
-│   ├── optimizer.py         # 优化器配置
-│   └── scheduler.py         # 学习率调度器
+├── outputs/                          # 实验输出
+│   ├── checkpoints/                  # 模型检查点（如适用）
+│   ├── logs/                        # 训练日志
+│   └── results/                     # 实验结果
+│       ├── exp_001_datasets_stats/
+│       └── ...
 │
-├── utils/                   # 工具函数
-│   ├── __init__.py
-│   ├── config.py            # 配置加载
-│   ├── metrics.py           # 评估指标
-│   ├── seed.py              # 随机种子设置
-│   └── logger.py            # 日志工具
+├── docs/                             # 详细文档
+│   ├── environment/                  # 环境管理
+│   │   ├── setup.md
+│   │   ├── dependencies.md
+│   │   ├── verification.md
+│   │   └── specs.md
+│   ├── development/                  # 开发规范
+│   │   ├── code-style.md
+│   │   ├── best-practices.md
+│   │   ├── debugging.md
+│   │   └── git-workflow.md
+│   └── experiments/                  # 实验管理
+│       ├── getting-started.md
+│       ├── management.md
+│       ├── project-structure.md
+│       └── fineweb_stats.md
 │
-├── configs/                 # 实验配置（YAML/JSON）
-│   ├── exp_001.yaml         # 实验 001 配置
-│   ├── exp_002.yaml         # 实验 002 配置
-│   └── default.yaml        # 默认配置
+├── .sisyphus/                       # 内部工作目录
+│   ├── drafts/                       # 草稿文件
+│   ├── plans/                        # 计划文档
+│   └── developer-notes/              # 开发者笔记
 │
-├── experiments/             # 实验脚本和 Jupyter notebooks
-│   ├── exp_000_environment_check.py  # 环境检查
-│   ├── exp_001_baseline.py            # 实验 001
-│   ├── exp_002_tune_lr.py             # 实验 002
-│   └── notebooks/                      # Jupyter notebooks
-│       ├── exp_001_baseline.ipynb
-│       └── exp_002_tune_lr.ipynb
-│
-├── outputs/                 # 模型检查点、日志、结果
-│   ├── checkpoints/        # 模型检查点
-│   │   ├── exp_001/
-│   │   │   └── model.pth
-│   │   └── exp_002/
-│   │       └── model.pth
-│   ├── logs/               # 训练日志
-│   │   ├── exp_001.log
-│   │   └── exp_002.log
-│   └── results/            # 实验结果
-│       ├── exp_001/
-│       │   ├── metrics.pth
-│       │   ├── loss_curve.png
-│       │   └── predictions.npy
-│       └── exp_002/
-│           ├── metrics.pth
-│           ├── loss_curve.png
-│           └── predictions.npy
-│
-├── docs/                    # 详细文档
-│   ├── README.md           # 文档索引
-│   ├── environment/
-│   │   ├── setup.md       # 环境初始化
-│   │   ├── dependencies.md # 依赖管理
-│   │   └── verification.md # 环境验证
-│   ├── development/
-│   │   ├── code-style.md   # 代码风格
-│   │   ├── best-practices.md # 最佳实践
-│   │   └── debugging.md   # 调试技巧
-│   └── experiments/
-│       ├── getting-started.md # 开始实验
-│       ├── management.md   # 实验管理
-│       └── project-structure.md # 项目结构（本文档）
-│
-└── tests/                   # 测试文件（可选）
-    ├── __init__.py
-    ├── test_models.py
-    ├── test_data.py
-    └── test_training.py
+├── .venv/                           # Python 虚拟环境（已忽略）
+├── .pytest_cache/                    # Pytest 缓存（已忽略）
+└── .ruff_cache/                     # Ruff 缓存（已忽略）
+```
+
+---
+
+## 实验目录结构详解
+
+### experiments/000/ - 环境验证实验
+
+```
+000/
+├── exp_000_environment_check.py    # 主脚本：环境检查
+├── system_info.py                   # 系统信息收集
+├── torch_info.py                   # PyTorch 信息和测试
+├── __init__.py
+└── __main__.py                    # 模块入口
+```
+
+**运行方式**：
+```bash
+python -m experiments.000
+```
+
+### experiments/001/ - 数据集统计实验
+
+```
+001/
+├── exp_001_datasets_stats.py       # 主脚本：数据集统计
+├── cli.py                         # 命令行接口
+├── config.py                      # 配置管理（dataclass）
+├── pipeline.py                    # Datatrove 流水线
+├── collector.py                   # 统计收集器
+├── stats_utils.py                 # 统计工具
+├── io_utils.py                   # I/O 工具
+├── __init__.py
+└── __main__.py                    # 模块入口
+```
+
+**运行方式**：
+```bash
+python -m experiments.001 explore --dataset <name> --data-dir <path> --workers 8
+```
+
+### experiments/utils/ - 共享工具模块
+
+```
+utils/
+├── __init__.py
+├── common.py                      # 通用工具（日志、datatrove工具等）
+├── paths.py                       # 路径处理
+└── constants.py                  # 常量定义
 ```
 
 ---
@@ -107,14 +138,12 @@ nanomind/
 
 ```python
 # 推荐：绝对导入
-from models import SimpleModel
-from data import DataLoader
-from training import Trainer
-from utils import load_config, set_seed
+from experiments.utils import setup_logger, setup_experiment_paths
+from experiments.utils.paths import project_root
 
-# 不推荐：相对导入
-from ..models import SimpleModel
-from .utils import load_config
+# 推荐：相对导入（在实验模块内）
+from .config import DATASET_CONFIGS
+from .pipeline import create_pipeline
 ```
 
 ### 导入顺序
@@ -125,6 +154,7 @@ from .utils import load_config
 # 1. 标准库
 import os
 import sys
+import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -132,71 +162,57 @@ from typing import List, Optional, Dict, Any
 import torch
 import torch.nn as nn
 import numpy as np
-from transformers import AutoModel
+from transformers import AutoModel, AutoTokenizer
+from datatrove.pipeline.base import PipelineStep
 
 # 3. 本地模块
-from models import SimpleModel
-from data import DataLoader
-from training import Trainer
-from utils import load_config
+from experiments.utils import setup_logger, setup_experiment_paths
+from experiments.utils.paths import project_root
+from .config import DATASET_CONFIGS
 ```
 
 ---
 
 ## 配置管理
 
-### 使用 YAML 配置文件
+### 使用 argparse + dataclass
 
-创建 `configs/exp_001.yaml`：
+本项目使用 `argparse` 和 `dataclass` 组合进行配置管理，不使用 YAML 配置文件。
 
-```yaml
-# 实验 001 配置
-
-# 训练参数
-learning_rate: 0.001
-batch_size: 32
-epochs: 10
-optimizer: Adam
-
-# 模型参数
-model:
-  input_size: 784
-  hidden_size: 128
-  output_size: 10
-
-# 数据参数
-data:
-  train_split: 0.8
-  val_split: 0.1
-  test_split: 0.1
-
-# 输出参数
-output:
-  checkpoint_dir: outputs/checkpoints/exp_001
-  log_dir: outputs/logs/exp_001.log
-  result_dir: outputs/results/exp_001
-```
-
-### 加载配置
+**配置示例**（experiments/001/config.py）：
 
 ```python
-# utils/config.py
-import yaml
-from pathlib import Path
-from typing import Dict, Any
+from dataclasses import dataclass
+from typing import Optional
 
-def load_config(config_path: str) -> Dict[str, Any]:
-    """加载 YAML 配置文件。"""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
+@dataclass
+class DatasetConfig:
+    """数据集配置类。"""
+    name: str
+    path: str
+    text_key: str = "text"
+    id_key: Optional[str] = "id"
+    score_field: Optional[str] = "score"
+    glob_pattern: str = "**/*.parquet"
+```
 
-# 使用配置
-from utils import load_config
+**命令行接口**（experiments/001/cli.py）：
 
-config = load_config('configs/exp_001.yaml')
-learning_rate = config['learning_rate']
-batch_size = config['batch_size']
+```python
+import argparse
+
+def create_parser() -> argparse.ArgumentParser:
+    """创建命令行参数解析器。"""
+    parser = argparse.ArgumentParser(
+        description="多数据集统计与探索",
+    )
+    parser.add_argument("--dataset", type=str, nargs="+", required=True,
+                       help="数据集名称")
+    parser.add_argument("--output-dir", type=str, default="outputs/exp_001",
+                       help="输出目录")
+    parser.add_argument("--workers", type=int, default=8,
+                       help="Worker 数量")
+    return parser
 ```
 
 ---
@@ -205,71 +221,54 @@ batch_size = config['batch_size']
 
 ### 单一职责原则
 
-每个模块应该有单一、明确的职责：
+每个实验目录应该有单一、明确的职责：
 
-```python
-# models/simple_model.py
-"""定义简单的神经网络模型。"""
-import torch.nn as nn
-
-class SimpleModel(nn.Module):
-    """简单的全连接神经网络。"""
-    pass
-
-# training/trainer.py
-"""训练器类，负责训练循环。"""
-class Trainer:
-    """训练器。"""
-    pass
-
-# utils/metrics.py
-"""评估指标计算函数。"""
-def accuracy(predictions, labels):
-    """计算准确率。"""
-    pass
+```
+experiments/
+├── 000/               # 环境验证职责
+│   ├── exp_000...     # 主实验脚本
+│   ├── system_info.py # 系统信息模块
+│   └── torch_info.py  # PyTorch 信息模块
+│
+└── 001/               # 数据统计职责
+    ├── exp_001...     # 主实验脚本
+    ├── cli.py         # CLI 模块
+    ├── config.py      # 配置模块
+    ├── pipeline.py    # 流水线模块
+    ├── collector.py   # 收集器模块
+    └── stats_utils.py # 统计工具模块
 ```
 
-### 避免循环导入
+### 工具模块复用
+
+将常用工具函数放在 `experiments/utils/` 目录：
 
 ```python
-# 错误：循环导入
-# models/__init__.py
-from training import Trainer  # ❌
+# experiments/utils/common.py
+import logging
+from pathlib import Path
+from datatrove.pipeline.base import PipelineStep, DocumentsPipeline
+from typing import List, Optional, Dict, Any
 
-# training/__init__.py
-from models import SimpleModel  # ❌
+def setup_logger(name: str, verbose: bool = False) -> logging.Logger:
+    """设置日志记录器。"""
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    # ... handler 设置
+    return logger
 
-# 正确：使用类型提示（forward reference）
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from training import Trainer
-
-class SimpleModel(nn.Module):
-    def __init__(self, trainer: 'Trainer'):
-        pass
-```
-
-### 模块初始化
-
-每个目录都应该包含 `__init__.py`：
-
-```python
-# models/__init__.py
-"""模型模块。"""
-
-from .base_model import BaseModel
-from .simple_model import SimpleModel
-from .transformer_model import TransformerModel
-
-__all__ = ['BaseModel', 'SimpleModel', 'TransformerModel']
+def setup_experiment_paths(script_path: str) -> Dict[str, Path]:
+    """设置实验路径。"""
+    project_root = Path(script_path).parent.parent.parent
+    # ... 路径计算
+    return paths
 ```
 
 ---
 
 ## .gitignore 规则
 
-创建 `.gitignore` 文件：
+### 当前 .gitignore 内容
 
 ```gitignore
 # Python
@@ -284,6 +283,7 @@ __pycache__/
 *.ipynb
 
 # 虚拟环境
+.venv/
 venv/
 env/
 ENV/
@@ -294,15 +294,13 @@ outputs/
 *.pt
 *.log
 
+# 数据文件
+data/datasets/
+
 # 模型缓存
 .cache/
 *.ckpt
-
-# 数据文件
-data/
-*.csv
-*.json
-*.parquet
+*.safetensors
 
 # IDE
 .vscode/
@@ -313,114 +311,38 @@ data/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 内部目录
+.sisyphus/
 ```
 
 ---
 
 ## 常见目录操作
 
-### 创建目录结构
+### 创建新实验
 
 ```bash
-# 创建标准项目结构
-mkdir -p models data training utils configs experiments outputs/{checkpoints,logs,results}
+# 1. 创建实验目录
+mkdir -p experiments/002
 
-# 创建 __init__.py 文件
-touch models/__init__.py
-touch data/__init__.py
-touch training/__init__.py
-touch utils/__init__.py
-touch tests/__init__.py
+# 2. 创建基本文件
+touch experiments/002/__init__.py
+touch experiments/002/__main__.py
+touch experiments/002/exp_002_experiment.py
+
+# 3. 复制工具模块（如需要）
+cp experiments/001/cli.py experiments/002/
 ```
 
-### 初始化项目
+### 初始化实验
 
 ```bash
-# 初始化 Git 仓库
-git init
+# 在 experiments/002/__main__.py 中添加：
+from exp_002_experiment import main
 
-# 创建 .gitignore
-cat > .gitignore << 'EOF'
-__pycache__/
-*.py[cod]
-outputs/
-*.pth
-*.log
-EOF
-
-# 添加文件
-git add .
-git commit -m "Initial commit"
-```
-
----
-
-## 代码复用策略
-
-### 工具函数
-
-将常用工具函数放在 `utils/` 目录：
-
-```python
-# utils/seed.py
-import random
-import numpy as np
-import torch
-
-def set_seed(seed: int = 42):
-    """设置所有随机种子。"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-# utils/logger.py
-import logging
-from pathlib import Path
-
-def setup_logger(name: str, log_file: str):
-    """设置日志记录器。"""
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-
-    # 文件处理器
-    fh = logging.FileHandler(log_file)
-    fh.setLevel(logging.INFO)
-
-    # 控制台处理器
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-
-    # 格式化器
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    fh.setFormatter(formatter)
-    ch.setFormatter(formatter)
-
-    logger.addHandler(fh)
-    logger.addHandler(ch)
-
-    return logger
-```
-
-### 基础类
-
-在 `models/base_model.py` 中定义基础模型类：
-
-```python
-import torch.nn as nn
-
-class BaseModel(nn.Module):
-    """所有模型的基类。"""
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        raise NotImplementedError
-
-    def get_num_params(self):
-        """获取模型参数数量。"""
-        return sum(p.numel() for p in self.parameters())
+if __name__ == "__main__":
+    main()
 ```
 
 ---

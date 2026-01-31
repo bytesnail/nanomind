@@ -73,7 +73,7 @@ uv pip compile pyproject.toml -o requirements.txt
 uv pip install -r requirements.txt
 
 # 5. 验证
-python experiments/exp_000_environment_check.py
+python -m experiments.000
 ```
 
 ### 常见版本冲突
@@ -114,7 +114,7 @@ print('✓ CUDA available:', torch.cuda.is_available())
 "
 
 # 5. 运行环境检查
-python experiments/exp_000_environment_check.py
+python -m experiments.000
 ```
 
 ### 升级单个包
@@ -219,7 +219,7 @@ python test_upgrade.py
 ### 完整环境检查
 
 ```bash
-python experiments/exp_000_environment_check.py 2>&1 | tee outputs/logs/exp_000_environment_check.log
+python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
 ```
 
 ---
@@ -239,7 +239,7 @@ git revert <commit-hash>
 uv pip install -r requirements.txt
 
 # 4. 验证
-python experiments/exp_000_environment_check.py
+python -m experiments.000
 ```
 
 ### 手动回滚
@@ -255,7 +255,7 @@ uv pip compile pyproject.toml -o requirements.txt
 uv pip install -r requirements.txt
 
 # 4. 验证
-python experiments/exp_000_environment_check.py
+python -m experiments.000
 ```
 
 ---

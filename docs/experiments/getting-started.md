@@ -15,12 +15,87 @@ mkdir -p models data training utils configs experiments outputs/{checkpoints,log
 
 ---
 
-## 完整实验脚本模板
+## 实验脚本模板
+
+### 当前项目实验模式（Datatrove 数据处理）
 
 ```python
-"""实验 001: 基线模型
+"""实验 002: 数据探索与分析
 
-目的: 建立性能基线
+目的: 分析数据集的统计信息和特征
+超参数:
+  - dataset: 数据集名称
+  - workers: 并行 worker 数量
+  - batch_size: 批量大小
+"""
+
+import argparse
+import logging
+from pathlib import Path
+from typing import Dict, Any
+
+from experiments.utils import setup_logger, setup_experiment_paths
+
+# 设置实验路径
+setup_experiment_paths(__file__)
+
+# 设置日志
+logger = setup_logger(__name__)
+
+def main() -> None:
+    """运行实验。"""
+    print("=" * 50)
+    print("实验 002: 数据探索与分析")
+    print("=" * 50)
+    print()
+
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description="数据探索与分析")
+    parser.add_argument("--dataset", type=str, required=True,
+                       help="数据集名称")
+    parser.add_argument("--data-dir", type=str, required=True,
+                       help="数据目录")
+    parser.add_argument("--workers", type=int, default=8,
+                       help="Worker 数量")
+    args = parser.parse_args()
+
+    # 打印配置
+    logger.info(f"数据集: {args.dataset}")
+    logger.info(f"数据目录: {args.data_dir}")
+    logger.info(f"Worker 数量: {args.workers}")
+    logger.info("")
+
+    # 创建 Datatrove 流水线
+    logger.info("创建数据处理流水线...")
+    from datatrove.pipeline import PipelineStep
+
+    # ... 流水线配置
+
+    # 运行流水线
+    logger.info("开始处理...")
+    # ... 流水线执行
+
+    # 保存结果
+    logger.info("保存结果...")
+    # ... 结果保存
+
+    # 打印最终结果
+    print("=" * 50)
+    print("实验完成!")
+    print("=" * 50)
+
+if __name__ == '__main__':
+    main()
+```
+
+### 传统训练实验模板（参考）
+
+如果需要创建传统模型训练实验，可以参考以下模板（需要先创建 models/、training/ 等模块）：
+
+```python
+"""实验 003: 模型训练（通用模板）
+
+目的: 训练神经网络模型
 超参数:
   - learning_rate: 0.001
   - batch_size: 32
@@ -32,60 +107,48 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from typing import Dict, Any
 
-from models import SimpleModel
-from training import Trainer
-from utils import set_seed
+from experiments.utils import setup_experiment_paths
 
-# 设置随机种子
-set_seed(42)
+# 设置实验路径
+setup_experiment_paths(__file__)
 
 # 超参数配置
 CONFIG: Dict[str, Any] = {
     'learning_rate': 0.001,
     'batch_size': 32,
     'epochs': 10,
-    'model': {
-        'input_size': 784,
-        'hidden_size': 128,
-        'output_size': 10,
-    }
 }
 
 def main() -> None:
     """运行实验。"""
     # 打印配置
     print("=" * 50)
-    print("实验 001: 基线模型")
+    print("实验 003: 模型训练")
     print("=" * 50)
     print(f"学习率: {CONFIG['learning_rate']}")
     print(f"批量大小: {CONFIG['batch_size']}")
     print(f"训练轮数: {CONFIG['epochs']}")
     print()
 
+    # 创建数据加载器
+    print("创建数据加载器...")
+    # dataloader = create_dataloader(CONFIG['batch_size'])
+
     # 创建模型
     print("创建模型...")
-    model = SimpleModel(**CONFIG['model'])
-
-    # 创建训练器
-    print("创建训练器...")
-    trainer = Trainer(model, learning_rate=CONFIG['learning_rate'])
+    # model = create_model()
 
     # 训练
     print("开始训练...")
-    metrics = trainer.train(
-        epochs=CONFIG['epochs'],
-        batch_size=CONFIG['batch_size'],
-    )
+    # train_model(model, dataloader, CONFIG)
 
     # 保存结果
     print("保存结果...")
-    torch.save(metrics, 'outputs/results/exp_001_metrics.pth')
+    # torch.save(metrics, 'outputs/results/exp_003_metrics.pth')
 
     # 打印最终结果
     print("=" * 50)
     print("实验完成!")
-    print(f"最终损失: {metrics['loss'][-1]:.4f}")
-    print(f"最终准确率: {metrics['accuracy'][-1]:.4f}")
     print("=" * 50)
 
 if __name__ == '__main__':
@@ -260,30 +323,38 @@ optimizer = optim.RMSprop(model.parameters(), lr=0.001)
 
 ### 文件命名
 
+**当前项目中的实验**：
 ```
-exp_001_baseline.py          # 基线实验
-exp_002_tune_lr.py           # 调整学习率
-exp_003_increase_hidden.py   # 增加隐藏层
-exp_004_dropout.py           # 添加 Dropout
-exp_005_early_stopping.py    # 早停
+experiments/
+├── 000/                      # 环境验证实验
+│   └── exp_000_environment_check.py
+└── 001/                      # 数据集统计实验
+    ├── exp_001_datasets_stats.py
+    ├── config.py
+    ├── cli.py
+    └── ...
+```
+
+**通用命名规范**（用于未来的实验）：
+```
+exp_002_baseline.py          # 基线实验
+exp_003_tune_lr.py           # 调整学习率
+exp_004_increase_hidden.py   # 增加隐藏层
+exp_005_dropout.py           # 添加 Dropout
 ```
 
 ### 目录命名
 
 ```
 outputs/
-├── checkpoints/
-│   ├── exp_001_baseline.pth
-│   ├── exp_002_tune_lr.pth
-│   └── exp_003_increase_hidden.pth
-├── logs/
-│   ├── exp_001_baseline.log
-│   ├── exp_002_tune_lr.log
-│   └── exp_003_increase_hidden.log
-└── results/
-    ├── exp_001_baseline/
-    ├── exp_002_tune_lr/
-    └── exp_003_increase_hidden/
+├── checkpoints/             # 模型检查点（如适用）
+├── logs/                   # 实验日志
+│   ├── exp_000_environment_check.log
+│   └── exp_001_datasets_stats.log
+└── results/                # 实验结果
+    ├── exp_001_datasets_stats/
+    │   ├── summary.json
+    │   └── ...
 ```
 
 ---
@@ -293,14 +364,17 @@ outputs/
 ### 命令行运行
 
 ```bash
-# 运行单个实验
-python experiments/exp_001_baseline.py
+# 运行环境检查实验（exp_000）
+python -m experiments.000
+
+# 运行数据集统计实验（exp_001）
+python -m experiments.001 explore --dataset <name> --data-dir <path> --workers 8
 
 # 运行实验并输出到日志文件
-python experiments/exp_001_baseline.py 2>&1 | tee outputs/logs/exp_001_baseline.log
+python -m experiments.001 2>&1 | tee outputs/logs/exp_001.log
 
 # 后台运行
-nohup python experiments/exp_001_baseline.py > outputs/logs/exp_001_baseline.log 2>&1 &
+nohup python -m experiments.001 > outputs/logs/exp_001.log 2>&1 &
 ```
 
 ### Jupyter Notebook 运行

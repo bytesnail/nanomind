@@ -4,6 +4,12 @@
 
 使用 Python 3.12 和 PyTorch 生态系统进行深度学习和LLM学习与试验。
 
+**核心依赖**：
+- **PyTorch 2.10.0**: 深度学习框架
+- **Transformers 5.0.0**: HuggingFace 模型库
+- **Datasets 4.5.0**: 数据集处理库
+- **Datatrove 0.8.0+**: 大规模数据处理流水线（用于数据统计和探索）
+
 **核心原则**:
 1. **代码清晰度优于优化**
 2. **可复现性优先**
@@ -43,10 +49,16 @@
   - 使用 `--help` 查看参数说明
   - 使用 `outputs/` 记录实验结果
   - 使用 `exp:` 前缀提交实验相关代码
+  - 使用 datatrove 进行大规模数据处理
 - **DON'T**:
   - 不硬编码超参数到代码中
   - 不提交模型检查点（outputs/ 下的 .pth 文件）
   - 不提交大型数据集文件
+
+**DataTrove 说明**：
+- 用于大规模数据处理和流水线操作
+- 在 exp_001 中用于多数据集统计
+- 支持分布式处理和并行统计收集
 
 ---
 
@@ -67,16 +79,18 @@
 ```bash
 conda activate nanomind
 uv pip install -r requirements.txt
-python experiments/exp_000_environment_check.py
+python -m experiments.000
+# 或
+python -m experiments.000
 ```
 
 ### 开发
 ```bash
 # 查看实验参数
-python experiments/exp_001_datasets_stats.py --help
+python -m experiments.001 --help
 
 # 运行实验
-python experiments/exp_001_datasets_stats.py explore --dataset <name> --data-dir <path> --workers 8
+python -m experiments.001 explore --dataset <name> --data-dir <path> --workers 8
 
 # 代码工具
 uv add <package> --no-sync

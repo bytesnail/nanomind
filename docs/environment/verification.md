@@ -20,15 +20,15 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 
 ### 使用环境检查脚本
 
-环境检查脚本位于 `experiments/exp_000_environment_check.py`。
+环境检查脚本位于 `experiments/000/exp_000_environment_check.py`。
 
 **运行方式：**
 ```bash
 # 仅输出到终端
-python experiments/exp_000_environment_check.py
+python -m experiments.000
 
 # 同时输出到终端和日志文件
-python experiments/exp_000_environment_check.py 2>&1 | tee outputs/logs/exp_000_environment_check.log
+python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
 ```
 
 **输出解读：**
@@ -146,10 +146,10 @@ print('✓ tokenizer 正常')
 
 ```bash
 # 方法 1: 直接运行
-python experiments/exp_000_environment_check.py
+python -m experiments.000
 
 # 方法 2: 输出到日志文件
-python experiments/exp_000_environment_check.py 2>&1 | tee outputs/logs/exp_000_environment_check.log
+python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
 ```
 
 ### 输出内容

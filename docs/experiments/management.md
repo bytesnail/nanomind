@@ -67,20 +67,35 @@ torch.save(model.state_dict(), f'outputs/checkpoints/exp_001/model.pth')
 
 ```bash
 # 运行实验并输出到日志文件
-python experiments/exp_001_baseline.py 2>&1 | tee outputs/logs/exp_001_baseline.log
+python -m experiments.001 2>&1 | tee outputs/logs/exp_001.log
 
 # 查看日志
-tail -f outputs/logs/exp_001_baseline.log
+tail -f outputs/logs/exp_001.log
 
 # 搜索日志中的错误
-grep -i "error" outputs/logs/exp_001_baseline.log
+grep -i "error" outputs/logs/exp_001.log
 ```
 
 ---
 
 ## 实验追踪
 
-### 使用 TensorBoard
+### 使用日志文件（推荐）
+
+```bash
+# 运行实验并输出到日志文件
+python -m experiments.001 2>&1 | tee outputs/logs/exp_001.log
+
+# 查看日志
+tail -f outputs/logs/exp_001.log
+
+# 搜索日志中的错误
+grep -i "error" outputs/logs/exp_001.log
+```
+
+### 使用 TensorBoard（可选，未实现）
+
+> **注意**：当前项目尚未实现 TensorBoard 集成。如需添加此功能，请参考以下示例：
 
 ```bash
 # 安装 TensorBoard
@@ -105,13 +120,13 @@ writer.add_hparams(CONFIG, {})
 for epoch in range(CONFIG['epochs']):
     writer.add_scalar('Loss/train', train_loss, epoch)
     writer.add_scalar('Loss/val', val_loss, epoch)
-    writer.add_scalar('Accuracy/train', train_acc, epoch)
-    writer.add_scalar('Accuracy/val', val_acc, epoch)
 
 writer.close()
 ```
 
-### 使用 Weights & Biases（可选）
+### 使用 Weights & Biases（可选，未实现）
+
+> **注意**：当前项目尚未实现 W&B 集成。如需添加此功能，请参考以下示例：
 
 ```bash
 # 安装 wandb
@@ -128,17 +143,11 @@ import wandb
 wandb.init(
     project="nanomind",
     config=CONFIG,
-    name="exp_001_baseline"
+    name="exp_001"
 )
 
 # 记录指标
-for epoch in range(CONFIG['epochs']):
-    wandb.log({
-        'train_loss': train_loss,
-        'val_loss': val_loss,
-        'train_accuracy': train_acc,
-        'val_accuracy': val_acc,
-    })
+wandb.log({'loss': loss, 'accuracy': acc})
 
 # 完成实验
 wandb.finish()
@@ -308,27 +317,49 @@ exp_005_early_stopping.py    # 早停
 exp_006_data_augmentation.py # 数据增强
 ```
 
-### 2. 配置文件管理
+### 2. 配置管理
 
-使用配置文件管理超参数：
+**当前项目使用 argparse + dataclass 配置管理**：
 
 ```python
-# config/exp_001.yaml
+# experiments/001/config.py
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class DatasetConfig:
+    """数据集配置类。"""
+    name: str
+    path: str
+    text_key: str = "text"
+    id_key: Optional[str] = "id"
+    score_field: Optional[str] = "score"
+    glob_pattern: str = "**/*.parquet"
+
+DATASET_CONFIGS: Dict[str, DatasetConfig] = {
+    "dataset_name": DatasetConfig(
+        name="dataset_name",
+        path="data/datasets/dataset_name/",
+        # ...
+    ),
+}
+```
+
+**如需使用 YAML 配置（可选）**：
+
+```python
+# config/exp_002.yaml
 learning_rate: 0.001
 batch_size: 32
 epochs: 10
 optimizer: Adam
-model:
-  input_size: 784
-  hidden_size: 128
-  output_size: 10
 ```
 
 ```python
-# 加载配置文件
+# 加载 YAML 配置
 import yaml
 
-with open('config/exp_001.yaml', 'r') as f:
+with open('config/exp_002.yaml', 'r') as f:
     config = yaml.safe_load(f)
 ```
 
@@ -336,12 +367,12 @@ with open('config/exp_001.yaml', 'r') as f:
 
 ```bash
 # 提交实验代码
-git add experiments/exp_001_baseline.py
-git commit -m "exp: 添加实验 001 - 基线模型"
+git add experiments/001/
+git commit -m "exp: 添加实验 001 - 数据集统计"
 
-# 提交配置文件
-git add config/exp_001.yaml
-git commit -m "config: 添加实验 001 配置"
+# 提交配置文件（如使用 YAML）
+# git add config/exp_002.yaml
+# git commit -m "config: 添加实验 002 配置"
 
 # 不要提交结果文件和检查点
 # 在 .gitignore 中添加:
@@ -352,25 +383,29 @@ git commit -m "config: 添加实验 001 配置"
 
 ### 4. 实验文档
 
-创建 `experiments/README.md` 记录实验历史：
+当前项目的实验记录：
+- `exp_000`: 环境验证（参见 docs/experiments/fineweb_stats.md）
+- `exp_001`: 数据集统计（参见 docs/experiments/fineweb_stats.md）
+
+**建议创建** `experiments/README.md` 记录实验历史：
 
 ```markdown
 # 实验历史
 
-## 2026-01-28
+## 2026-01-31
 
-### exp_001: 基线模型
-- 目的: 建立性能基线
-- 配置: lr=0.001, batch_size=32, epochs=10
-- 结果: loss=0.1234, accuracy=0.9567
-- 结论: 基线性能良好
+### exp_000: 环境验证
+- 目的: 验证项目环境配置
+- 验证项: Python, PyTorch, CUDA, 数据加载
+- 状态: ✅ 通过
 
-### exp_002: 调整学习率
-- 目的: 测试不同学习率
-- 配置: lr=0.0005, batch_size=32, epochs=10
-- 结果: loss=0.1156, accuracy=0.9623
-- 结论: 降低学习率略微提升性能
+### exp_001: 数据集统计
+- 目的: 分析数据集的统计信息
+- 数据集: FineWeb-Edu, FineMath, GitHub Code 2025
+- 结果: 详见 outputs/results/exp_001/
 ```
+
+**可选**：使用 Weights & Biases 或其他工具进行在线实验追踪（需要实现）
 
 ---
 

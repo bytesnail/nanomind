@@ -123,10 +123,10 @@ python -c "import transformers; print('Transformers:', transformers.__version__)
 
 ```bash
 # 运行环境检查脚本
-python experiments/exp_000_environment_check.py
+python -m experiments.000
 
 # 同时输出到终端和日志文件
-python experiments/exp_000_environment_check.py 2>&1 | tee outputs/logs/exp_000_environment_check.log
+python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
 ```
 
 ### 手动验证
