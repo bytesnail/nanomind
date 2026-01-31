@@ -1,7 +1,6 @@
 """统计收集器模块。"""
 
 import json
-import logging
 import os
 from collections import Counter
 from typing import Any, Dict, Generator, List, Optional
@@ -44,10 +43,9 @@ class DatasetStatsCollector(PipelineStep):
         self.scores: List[float] = []
         self.int_score_counter: Counter = Counter()
         self.total_docs: int = 0
-        self.logger: logging.Logger = logging.getLogger(f"{self.name}")
 
     def run(
-            self, data: Any, rank: int = 0, world_size: int = 1
+        self, data: Any, rank: int = 0, world_size: int = 1
     ) -> Generator[Document, None, None]:
         """执行统计收集的流水线步骤。
 
@@ -88,13 +86,13 @@ class DatasetStatsCollector(PipelineStep):
                 _update_snapshot_stats(self.snapshot_stats, group_value, file_name)
 
         score_value = _collect_numeric_field(
-            doc.metadata, self.config.score_field, "score", self.logger
+            doc.metadata, self.config.score_field, "score"
         )
         if score_value is not None:
             self.scores.append(score_value)
 
         int_score_value = _collect_numeric_field(
-            doc.metadata, self.config.int_score_field, "int_score", self.logger
+            doc.metadata, self.config.int_score_field, "int_score"
         )
         if int_score_value is not None:
             self.int_score_counter[str(int(int_score_value))] += 1
@@ -132,7 +130,7 @@ class DatasetStatsCollector(PipelineStep):
 
     @staticmethod
     def aggregate_stats(
-            output_folder: str, config: DatasetConfig
+        output_folder: str, config: DatasetConfig
     ) -> Optional[StatsDict]:
         """聚合所有 worker 的统计结果。
 

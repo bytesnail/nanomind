@@ -1,7 +1,6 @@
 """命令行参数解析模块。"""
 
 import argparse
-import logging
 from typing import List
 
 from config import get_dataset_config, get_datasets_with_score
@@ -17,8 +16,6 @@ def create_parser() -> argparse.ArgumentParser:
         description="多数据集统计与探索",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-
-    parser.add_argument("--verbose", "-v", action="store_true", help="详细输出模式")
 
     parser.add_argument(
         "--dataset",
@@ -42,19 +39,18 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _prepare_datasets(args: argparse.Namespace, logger: logging.Logger) -> List[str]:
+def _prepare_datasets(args: argparse.Namespace) -> List[str]:
     """准备数据集列表。
 
     Args:
         args: 命令行参数命名空间。
-        logger: 日志记录器。
 
     Returns:
         数据集名称列表。
     """
     if "all" in args.dataset:
         dataset_names = get_datasets_with_score()
-        logger.info(f"处理所有有 score 的数据集: {dataset_names}")
+        print(f"ℹ️ 处理所有有 score 的数据集: {dataset_names}")
     else:
         dataset_names = args.dataset
         dataset_names = [
@@ -62,6 +58,6 @@ def _prepare_datasets(args: argparse.Namespace, logger: logging.Logger) -> List[
             for name in dataset_names
             if get_dataset_config(name).score_field is not None
         ]
-        logger.info(f"处理数据集: {dataset_names}")
+        print(f"ℹ️ 处理数据集: {dataset_names}")
 
     return dataset_names

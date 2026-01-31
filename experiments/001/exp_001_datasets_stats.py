@@ -8,7 +8,7 @@
 """
 
 import argparse
-import logging
+
 import os
 import sys
 from datetime import datetime
@@ -24,7 +24,7 @@ from experiments.utils.paths import setup_experiment_paths
 
 setup_experiment_paths(__file__)
 
-from experiments.utils.common import get_timestamp, setup_logging
+from experiments.utils.common import get_timestamp
 
 try:
     from .cli import create_parser, _prepare_datasets
@@ -44,32 +44,6 @@ _print_status = print_status
 StatsDict = Dict[str, Any]
 
 
-def _setup_dataset_logging(
-        config, dataset_output_dir: str, verbose: bool
-) -> logging.Logger:
-    """设置数据集日志。
-
-    Args:
-        config: 数据集配置对象。
-        dataset_output_dir (str): 数据集输出目录。
-        verbose (bool): 是否启用详细日志。
-
-    Returns:
-        logging.Logger: 配置好的 logger 实例。
-    """
-    log_dir = os.path.join(dataset_output_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-
-    timestamp = get_timestamp()
-    log_file = os.path.join(log_dir, f"exp_001_datasets_stats_{timestamp}.log")
-    logger = setup_logging(
-        f"exp_001_datasets_stats_{config.name.replace('/', '_')}",
-        "DEBUG" if verbose else "INFO",
-        log_file,
-    )
-    return logger
-
-
 def _print_dataset_info(config, dataset_output_dir: str) -> None:
     """打印数据集信息。
 
@@ -84,7 +58,7 @@ def _print_dataset_info(config, dataset_output_dir: str) -> None:
 
 
 def _build_results_dict(
-        config, custom_stats: StatsDict, start_time: str, end_time: str
+    config, custom_stats: StatsDict, start_time: str, end_time: str
 ) -> Dict[str, Any]:
     """构建结果字典。
 
@@ -128,7 +102,7 @@ def _print_dry_run_summary(dataset_names: List[str]) -> None:
 
 
 def _process_single_dataset(
-        dataset_name: str, args: argparse.Namespace, dataset_output_dir: str
+    dataset_name: str, args: argparse.Namespace, dataset_output_dir: str
 ) -> None:
     """处理单个数据集。
 
@@ -141,7 +115,6 @@ def _process_single_dataset(
     _print_dataset_info(config, dataset_output_dir)
 
     os.makedirs(dataset_output_dir, exist_ok=True)
-    logger = _setup_dataset_logging(config, dataset_output_dir, args.verbose)
 
     start_time = datetime.now().isoformat()
     try:
@@ -151,7 +124,6 @@ def _process_single_dataset(
             args.workers,
             args.batch_size,
             args.limit,
-            logger,
         )
 
         custom_stats = DatasetStatsCollector.aggregate_stats(dataset_output_dir, config)
@@ -159,7 +131,7 @@ def _process_single_dataset(
 
         if custom_stats:
             results = _build_results_dict(config, custom_stats, start_time, end_time)
-            save_results(results, dataset_output_dir, logger)
+            save_results(results, dataset_output_dir)
 
             _print_section("总结")
             print("  数据集统计完成")
@@ -168,21 +140,20 @@ def _process_single_dataset(
             _print_separator()
             print()
         else:
-            logger.warning(f"数据集 {config.name} 没有生成统计结果")
+            print(f"⚠️ 数据集 {config.name} 没有生成统计结果")
 
     except Exception as e:
-        logger.error(f"处理数据集 {config.name} 失败: {e}")
+        print(f"❌ 处理数据集 {config.name} 失败: {e}")
         _print_status(f"处理数据集 {config.name} 失败: {e}", "error")
 
 
-def run_experiment(args: argparse.Namespace, logger: logging.Logger) -> None:
+def run_experiment(args: argparse.Namespace) -> None:
     """执行多数据集处理。
 
     Args:
         args (argparse.Namespace): 命令行参数。
-        logger (logging.Logger): 日志记录器。
     """
-    dataset_names = _prepare_datasets(args, logger)
+    dataset_names = _prepare_datasets(args)
 
     if args.dry_run:
         _print_dry_run_summary(dataset_names)
@@ -208,13 +179,7 @@ def main() -> None:
     parser = create_parser()
     args = parser.parse_args()
 
-    logger = logging.getLogger("exp_001_datasets_stats")
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-
-    run_experiment(args, logger)
+    run_experiment(args)
 
 
 if __name__ == "__main__":

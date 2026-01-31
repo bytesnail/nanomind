@@ -11,7 +11,6 @@
 """
 
 import json
-import logging
 import os
 from typing import Any, Dict, Optional
 
@@ -37,9 +36,9 @@ def resolve_nested_field(data: Dict[str, Any], field_path: str) -> Any:
 
 
 def _update_snapshot_stats(
-        snapshot_stats: Dict[str, Dict[str, Any]],
-        group_key: str,
-        file_name: Optional[str],
+    snapshot_stats: Dict[str, Dict[str, Any]],
+    group_key: str,
+    file_name: Optional[str],
 ) -> None:
     """更新快照统计信息。
 
@@ -56,18 +55,16 @@ def _update_snapshot_stats(
 
 
 def _collect_numeric_field(
-        data: Dict[str, Any],
-        field_path: Optional[str],
-        field_name: str,
-        logger: logging.Logger,
+    data: Dict[str, Any],
+    field_path: Optional[str],
+    field_name: str,
 ) -> Optional[float]:
     """从文档数据中收集数值字段。
 
     Args:
         data: 文档数据字典。
         field_path: 字段路径（支持嵌套）。
-        field_name: 字段名称（用于日志）。
-        logger: 日志记录器。
+        field_name: 字段名称（用于标识）。
 
     Returns:
         浮点数值，如果未找到或转换失败则返回 None。
@@ -85,20 +82,16 @@ def _collect_numeric_field(
 
     try:
         return float(value)
-    except (ValueError, TypeError) as e:
-        logger.debug(f"Failed to convert {field_name} value: {value}, error: {e}")
+    except (ValueError, TypeError):
         return None
 
 
-def save_results(
-        results: Dict[str, Any], output_dir: str, logger: logging.Logger
-) -> None:
+def save_results(results: Dict[str, Any], output_dir: str) -> None:
     """保存最终统计结果。
 
     Args:
         results: 结果数据字典。
         output_dir: 输出目录路径。
-        logger: 日志记录器。
     """
     os.makedirs(os.path.join(output_dir, "results"), exist_ok=True)
     results_file = os.path.join(output_dir, "results", "dataset_stats.json")
@@ -106,5 +99,4 @@ def save_results(
     with open(results_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    logger.info(f"✅ 结果已保存到: {results_file}")
     print(f"\n✅ 结果已保存到: {results_file}")

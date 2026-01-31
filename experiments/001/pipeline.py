@@ -1,6 +1,5 @@
 """Pipeline 创建和执行模块。"""
 
-import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
 
@@ -13,9 +12,9 @@ from experiments.utils.common import create_local_executor
 
 
 def parquet_to_doc_adapter(
-        config: DatasetConfig,
-        data: Dict[str, Any],
-        source_file: str,
+    config: DatasetConfig,
+    data: Dict[str, Any],
+    source_file: str,
 ) -> Dict[str, Any]:
     """将 parquet 行转换为 Document 所需格式。
 
@@ -47,7 +46,7 @@ def parquet_to_doc_adapter(
 
 
 def create_adapter(
-        config: DatasetConfig,
+    config: DatasetConfig,
 ) -> Callable[[Dict[str, Any], str], Dict[str, Any]]:
     """创建配置好的适配器函数。
 
@@ -59,8 +58,8 @@ def create_adapter(
     """
 
     def adapter(
-            data: Dict[str, Any],
-            source_file: str,
+        data: Dict[str, Any],
+        source_file: str,
     ) -> Dict[str, Any]:
         """适配器函数，调用 parquet_to_doc_adapter 进行转换。"""
         return parquet_to_doc_adapter(config, data, source_file)
@@ -69,7 +68,7 @@ def create_adapter(
 
 
 def create_stats_collector(
-        config: DatasetConfig, output_folder: str
+    config: DatasetConfig, output_folder: str
 ) -> DatasetStatsCollector:
     """创建配置好的统计收集器。
 
@@ -84,10 +83,10 @@ def create_stats_collector(
 
 
 def create_pipeline(
-        config: DatasetConfig,
-        output_dir: str,
-        batch_size: int,
-        limit: Optional[int],
+    config: DatasetConfig,
+    output_dir: str,
+    batch_size: int,
+    limit: Optional[int],
 ) -> List[PipelineStep]:
     """创建 datatrove 处理流水线。
 
@@ -121,12 +120,11 @@ def create_pipeline(
 
 
 def run_pipeline(
-        config: DatasetConfig,
-        output_dir: str,
-        workers: int,
-        batch_size: int,
-        limit: Optional[int],
-        logger: logging.Logger,
+    config: DatasetConfig,
+    output_dir: str,
+    workers: int,
+    batch_size: int,
+    limit: Optional[int],
 ) -> None:
     """运行 datatrove pipeline。
 
@@ -136,7 +134,6 @@ def run_pipeline(
         workers: worker 数量。
         batch_size: 批量大小。
         limit: 文档数量限制。
-        logger: 日志记录器。
     """
     pipeline = create_pipeline(config, output_dir, batch_size, limit)
     executor = create_local_executor(
@@ -146,10 +143,10 @@ def run_pipeline(
         skip_completed=True,
     )
 
-    logger.info(f"启动 {workers} 个 worker 开始处理...")
+    print(f"ℹ️ 启动 {workers} 个 worker 开始处理...")
     try:
         executor.run()
-        logger.info("pipeline 执行完成")
+        print(f"✅ pipeline 执行完成")
     except Exception as e:
-        logger.error(f"pipeline 执行失败: {e}")
+        print(f"❌ pipeline 执行失败: {e}")
         raise
