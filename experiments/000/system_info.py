@@ -89,12 +89,11 @@ def _get_cpu_frequency(cpuinfo: str) -> str | None:
     return None
 
 
-def _get_core_counts(cpuinfo: str, physical_ids: set) -> dict:
+def _get_core_counts(cpuinfo: str) -> dict:
     """获取核心数量信息。
 
     Args:
         cpuinfo (str): CPU 信息文件内容。
-        physical_ids (set): 物理 CPU ID 集合。
 
     Returns:
         dict: 核心 ID 到核心数的映射字典。
@@ -128,7 +127,7 @@ def _add_core_info(info: dict, core_info: dict) -> None:
 
 
 def _build_base_info(
-    cpu_model: str | None, cpu_freq: str | None, physical_ids: set
+        cpu_model: str | None, cpu_freq: str | None, physical_ids: set
 ) -> dict:
     """构建基础 CPU 信息字典。
 
@@ -148,7 +147,7 @@ def _build_base_info(
 
 
 def _build_cpu_info_dict(
-    cpu_model: str | None, cpu_freq: str | None, core_info: dict, physical_ids: set
+        cpu_model: str | None, cpu_freq: str | None, core_info: dict, physical_ids: set
 ) -> dict:
     """构建 CPU 信息字典。
 
@@ -180,10 +179,10 @@ def get_linux_cpu_info() -> Dict[str, Any]:
         physical_ids = _collect_cpu_physical_ids(cpuinfo)
         cpu_model = _get_cpu_model(cpuinfo)
         cpu_freq = _get_cpu_frequency(cpuinfo)
-        core_info = _get_core_counts(cpuinfo, physical_ids)
+        core_info = _get_core_counts(cpuinfo)
         return _build_cpu_info_dict(cpu_model, cpu_freq, core_info, physical_ids)
-    except Exception as e:
-        logger.warning(f"CPU 信息获取失败: {e}")
+    except (OSError, ValueError, IndexError) as e:
+        logger.debug(f"获取 CPU 信息失败: {e}", exc_info=True)
         return {"CPU 信息": "获取失败"}
 
 
@@ -214,8 +213,7 @@ def get_linux_memory_info() -> Dict[str, Any]:
 
             usage_percent = (1 - available_kb / total_kb) * 100 if total_kb > 0 else 0
             info["内存使用率"] = f"{usage_percent:.1f}%"
-    except Exception as e:
-        logger.warning(f"内存信息获取失败: {e}")
+    except (OSError, ValueError, IndexError):
         info = {"内存信息": "获取失败"}
 
     return info

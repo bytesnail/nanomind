@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from datatrove.executor.local import LocalPipelineExecutor
 from datatrove.pipeline.base import PipelineStep
@@ -30,12 +30,13 @@ def print_separator(char: str = "=", length: int = SEPARATOR_WIDTH) -> None:
     print(char * length)
 
 
-def print_section(title: str, subtitle: str = "") -> None:
+def print_section(title: str, subtitle: str = "", data: Dict[str, Any] = None) -> None:
     """打印带标题的部分。
 
     Args:
         title: 标题。
         subtitle: 副标题。
+        data: 要显示的数据字典。
     """
     print_separator()
     if subtitle:
@@ -43,6 +44,9 @@ def print_section(title: str, subtitle: str = "") -> None:
     else:
         print(f"  {title}")
     print_separator()
+    if data:
+        for key, value in data.items():
+            print(f"  {key:25s}: {value}")
 
 
 def print_status(message: str, status: str = "info") -> None:
@@ -97,9 +101,9 @@ def get_timestamp() -> str:
 
 
 def setup_logging(
-    exp_name: str,
-    log_level: str = "INFO",
-    log_file: Optional[str] = None,
+        exp_name: str,
+        log_level: str = "INFO",
+        log_file: Optional[str] = None,
 ) -> logging.Logger:
     """设置日志记录器。
 
@@ -135,11 +139,11 @@ def setup_logging(
 
 
 def create_datatrove_pipeline(
-    data_dir: str,
-    output_dir: str,
-    include_doc_stats: bool = True,
-    include_lang_stats: bool = True,
-    custom_step: Optional[PipelineStep] = None,
+        data_dir: str,
+        output_dir: str,
+        include_doc_stats: bool = True,
+        include_lang_stats: bool = True,
+        custom_step: Optional[PipelineStep] = None,
 ) -> List[PipelineStep]:
     """创建 datatrove 处理流水线。
 
@@ -186,10 +190,10 @@ def create_datatrove_pipeline(
 
 
 def create_local_executor(
-    pipeline: List[PipelineStep],
-    workers: int,
-    logging_dir: str,
-    skip_completed: bool = True,
+        pipeline: List[PipelineStep],
+        workers: int,
+        logging_dir: str,
+        skip_completed: bool = True,
 ) -> LocalPipelineExecutor:
     """创建本地 pipeline 执行器。
 
