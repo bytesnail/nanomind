@@ -6,12 +6,17 @@
 
 ---
 
-## 创建项目结构
+## 项目结构说明
 
 ```bash
-# 创建必要的目录
-# 注意：以下目录结构用于传统训练实验，当前项目主要使用 Datatrove 进行数据处理
-mkdir -p models data training utils configs experiments outputs/{checkpoints,logs,results}
+# nanomind 项目已采用固定的目录结构，无需额外创建
+# 当前目录结构：
+# experiments/    # 实验脚本（核心目录）
+# data/           # 数据目录（使用符号链接）
+# outputs/        # 实验输出（checkpoints/, logs/, results/）
+# docs/           # 项目文档
+#
+# 注意：项目使用 Datatrove 进行大规模数据处理，与传统训练实验结构不同
 ```
 
 ---
@@ -386,7 +391,7 @@ outputs/
 python -m experiments.000
 
 # 运行数据集统计实验（exp_001）
-python -m experiments.001 explore --dataset <name> --data-dir <path> --workers 8
+python -m experiments.001 --dataset <name> --output-dir <path> --workers 8
 
 # 运行实验并输出到日志文件
 python -m experiments.001 2>&1 | tee outputs/logs/exp_001.log

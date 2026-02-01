@@ -1,10 +1,14 @@
-# FineWeb-Edu 统计实验文档
+# FineWeb-Edu 统计实验案例分析
+
+> **本文件是 FineWeb-Edu 统计实验的具体案例**。
+>
+> 完整的实验指南请参考 [exp-001 概览](exp-001-overview.md)。
+>
+> FineWeb-Edu 统计功能已整合到 `exp_001` 数据集统计实验中。本文档详细介绍 FineWeb-Edu 数据集的统计分析和结果解读。
 
 ## 概述
 
 FineWeb-Edu 统计实验提供了对 HuggingFaceFW/fineweb-edu 数据集的完整分析和统计收集功能。该实验使用 DataTrove 框架进行高效的数据处理，支持多 worker 并发处理和结果聚合。
-
-> **注意**：FineWeb-Edu 统计功能已整合到 `exp_001` 数据集统计实验中。本文档详细介绍 FineWeb-Edu 数据集的统计分析和结果解读。完整的实验说明请参考 [exp-001 概览](exp-001-overview.md)。
 
 ## 项目结构
 
@@ -71,7 +75,6 @@ outputs/
 - `--workers`: Worker 数量（默认 8）
 - `--batch-size`: 批量大小（默认 5000）
 - `--limit`: 限制处理的文档数（可选）
-- `--verbose`: 详细输出模式（可选）
 
 ## 使用方法
 
@@ -79,13 +82,12 @@ outputs/
 
 ```bash
 # 完整数据集统计
-python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8
+python -m experiments.001 --dataset HuggingFaceFW/fineweb-edu --workers 8
 
 # 快速统计（限制文档数）
-python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8 --limit 10000
+python -m experiments.001 --dataset HuggingFaceFW/fineweb-edu --workers 8 --limit 10000
 
 # 详细输出模式
-python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8 --verbose
 ```
 
 ### 查看帮助
@@ -137,7 +139,6 @@ DATASET_CONFIGS = {
 - `--workers`: 并行 worker 数量（默认 8）
 - `--batch-size`: 批量大小（默认 5000）
 - `--limit`: 限制处理的文档数（可选）
-- `--verbose`, `-v`: 详细输出模式（可选）
 - `--dry-run`: 演示模式，仅打印配置不实际执行（可选）
 - `--log-level`: 日志级别（默认: 从配置文件读取）
 
@@ -234,7 +235,6 @@ pytest tests/experiments/test_fineweb_stats.py --cov
 
 - **完整探索**: 使用 `fineweb.yaml`，处理全量数据
 - **快速验证**: 使用 `fineweb_quick.yaml`，处理小样本数据
-- **调试**: 使用 `--verbose` 和 `--dry-run` 参数
 
 ### 2. 性能优化
 
@@ -269,10 +269,9 @@ pytest tests/experiments/test_fineweb_stats.py --cov
 
 ```bash
 # 使用详细日志
-python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8 --verbose
 
 # 使用 dry run 查看配置
-python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --dry-run
+python -m experiments.001 --dataset HuggingFaceFW/fineweb-edu --dry-run
 
 # 查看帮助信息
 python -m experiments.001 --help

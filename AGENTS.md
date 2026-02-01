@@ -5,10 +5,10 @@
 使用 Python 3.12 和 PyTorch 生态系统进行深度学习和LLM学习与试验。
 
 **核心依赖**：
-- **PyTorch 2.10.0**: 深度学习框架
-- **Transformers 5.0.0**: HuggingFace 模型库
-- **Datasets 4.5.0**: 数据集处理库
-- **Datatrove 0.8.0+**: 大规模数据处理流水线（用于数据统计和探索）
+- **PyTorch >=2.10.0**: 深度学习框架
+- **Transformers >=5.0.0**: HuggingFace 模型库
+- **Datasets >=4.5.0**: 数据集处理库
+- **Datatrove >=0.8.0**: 大规模数据处理流水线（用于数据统计和探索）
 
 **核心原则**:
 1. **代码清晰度优于优化**
@@ -39,8 +39,12 @@
 - **NOTE**: 仅针对本项目目录下的操作无需等待交互授权
 
 ### PyTorch
-- **DO**: `get_device()`、`model.train()`/`model.eval()`、`torch.no_grad()`
+- **DO**: `get_device()`（推荐模式）、`model.train()`/`model.eval()`、`torch.no_grad()`
 - **DON'T**: 不手动管理设备、推理时不禁用梯度
+
+**注意事项**：
+- ⚠️ `get_device()` 是推荐的最佳实践模式，当前代码库中尚未实现。请使用 `torch.device('cuda')` 直接管理设备。
+- ⚠️ `model.train()`/`model.eval()` 和 `torch.no_grad()` 是最佳实践，当前数据探索实验中尚未应用这些模式。
 
 ### 实验
 - **DO**:
@@ -67,7 +71,7 @@
 | 操作 | 允许 | 说明 |
 |------|------|------|
 | 写入到 `experiments/` | ✅ | 实验代码 |
-| 写入到 `outputs/` | ✅ | 模型、日志、结果 |
+| 写入到 `outputs/` | ✅ | 日志、结果（checkpoints/ 在实验运行时创建） |
 | 修改 `configs/` | ⚠️ | 需要询问 |
 | 提交密钥 | 🚫 | 绝对禁止 |
 
@@ -87,8 +91,11 @@ python -m experiments.000
 # 查看实验参数
 python -m experiments.001 --help
 
-# 运行实验
-python -m experiments.001 explore --dataset <name> --data-dir <path> --workers 8
+# 运行实验（数据集统计）
+python -m experiments.001 --dataset <name> --output-dir <path> --workers 8
+
+# 运行所有有 score 的数据集
+python -m experiments.001 --dataset all --workers 8
 
 # 代码工具
 uv add <package> --no-sync
@@ -109,9 +116,9 @@ git commit -m "fix: correct device handling"
 
 **核心要点**：
 - 类型提示 + docstring → [代码风格](docs/development/code-style.md)
-- 使用 `get_device()` 自动选择设备 → [最佳实践](docs/development/best-practices.md)
-- `model.train()` / `model.eval()` 切换模式
-- 推理时使用 `torch.no_grad()` 禁用梯度
+- 使用 `get_device()` 自动选择设备（推荐模式，当前未实现）→ [最佳实践](docs/development/best-practices.md)
+- `model.train()` / `model.eval()` 切换模式（最佳实践，待应用）
+- 推理时使用 `torch.no_grad()` 禁用梯度（最佳实践，待应用）
 - 使用 `argparse` + `dataclass` 管理配置 → [实验管理](docs/experiments/management.md)
 
 ---

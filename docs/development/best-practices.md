@@ -10,6 +10,8 @@
 
 ### 自动选择设备
 
+⚠️ **注意**: `get_device()` 是推荐的最佳实践模式，当前代码库中尚未实现。请使用 `torch.device('cuda')` 直接管理设备。
+
 ```python
 import torch
 
@@ -42,6 +44,8 @@ if num_gpus > 1:
 ---
 
 ## 模型模式
+
+⚠️ **注意**: 以下为训练和推理的最佳实践模式，当前数据探索实验中尚未应用。
 
 ### train() 模式
 
@@ -207,6 +211,35 @@ torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 x = torch.randn(10, 10)  # 自动在 GPU 上（如果可用）
 ```
 
+### 变长注意力（Varlen Attention）
+
+```python
+# PyTorch 2.10.0 引入 varlen_attn() 用于处理不整齐/打包序列
+# 适用于 NLP 任务中的变长序列处理
+import torch.nn.functional as F
+
+# varlen_attn() 用于优化变长序列的注意力计算
+# 具体用法取决于您的模型和数据类型
+# 参考 PyTorch 文档获取详细使用方法
+```
+
+### 模型导出（torch.export）
+
+```python
+# PyTorch 2.10.0 推荐 torch.export 替代已弃用的 TorchScript
+import torch
+
+# 使用 torch.export 进行模型导出
+model = torch.nn.Linear(10, 5)
+args = (torch.randn(1, 10),)
+
+# 导出模型
+exported_program = torch.export.export(model, args)
+exported_program.save("model.pt2")
+
+# 注意：TorchScript 已弃用，建议使用 torch.export
+```
+
 ---
 
 ## 数据预处理
@@ -292,7 +325,8 @@ train_data.set_format('torch', columns=['input_ids', 'attention_mask', 'label'])
 
 ```bash
 # 安装 TensorBoard
-pip install tensorboard
+uv add tensorboard --no-sync
+uv pip install -r requirements.txt
 
 # 启动 TensorBoard
 tensorboard --logdir=outputs/logs

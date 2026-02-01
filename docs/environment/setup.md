@@ -16,14 +16,21 @@ conda activate nanomind
 # 2. 安装 uv（如果尚未安装）
 conda install -c conda-forge uv -y
 
-# 3. 初始化 uv 项目
-uv init
+# 3. 初始化 uv 项目（已跳过）
+# 注意：项目已初始化（已有 pyproject.toml），无需运行 uv init
+# 如果需要重新初始化，命令如下（谨慎使用，可能会覆盖现有配置）：
+# uv init
 
 # 4. 安装 CUDA（可选，用于 GPU 加速）
 conda install -c nvidia cuda=12.8 -y
 
-# 5. 添加项目依赖
+# 5. 添加项目依赖（核心包）
+# 方式一：逐个添加核心依赖
 uv add torch torchvision transformers datasets --no-sync
+uv add black datatrove matplotlib ruff tqdm --no-sync
+
+# 方式二：直接从 requirements.txt 安装所有依赖（推荐）
+uv pip install -r requirements.txt
 
 # 6. 生成 requirements.txt
 uv pip compile pyproject.toml -o requirements.txt
@@ -122,20 +129,20 @@ python -c "import transformers; print('Transformers:', transformers.__version__)
 ### 基础验证
 
 ```bash
-# 运行环境检查脚本
+# 运行环境检查脚本 ✅ 已验证
 python -m experiments.000
 
-# 同时输出到终端和日志文件
+# 同时输出到终端和日志文件 ✅ 已验证
 python -m experiments.000 2>&1 | tee outputs/logs/exp_000_environment_check.log
 ```
 
 ### 手动验证
 
 ```bash
-# 验证 PyTorch 和 CUDA
+# 验证 PyTorch 和 CUDA ✅ 已验证
 python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
 
-# 验证 GPU
+# 验证 GPU ✅ 已验证
 python -c "import torch; print('GPU 数量:', torch.cuda.device_count())"
 ```
 

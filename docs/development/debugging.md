@@ -316,7 +316,8 @@ inputs.requires_grad = True
 
 ```bash
 # 安装 TensorBoard
-pip install tensorboard
+uv add tensorboard --no-sync
+uv pip install -r requirements.txt
 
 # 启动 TensorBoard
 tensorboard --logdir=outputs/logs

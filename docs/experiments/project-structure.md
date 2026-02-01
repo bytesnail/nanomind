@@ -115,7 +115,7 @@ python -m experiments.000
 
 **运行方式**：
 ```bash
-python -m experiments.001 explore --dataset <name> --data-dir <path> --workers 8
+python -m experiments.001 --dataset <name> --output-dir <path> --workers 8
 ```
 
 ### experiments/utils/ - 共享工具模块

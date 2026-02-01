@@ -250,6 +250,8 @@ def train_epoch(
 
 ### 设备处理
 
+⚠️ **注意**: `get_device()` 是推荐的最佳实践模式，当前代码库中尚未实现。请使用 `torch.device('cuda')` 直接管理设备。
+
 ```python
 # 推荐：使用函数自动选择设备
 def get_device() -> torch.device:

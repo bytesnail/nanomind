@@ -26,7 +26,9 @@
 |------|------|
 | [setup.md](environment/setup.md) | 环境初始化：Conda、uv、CUDA 安装配置 |
 | [dependencies.md](environment/dependencies.md) | 依赖管理：版本、升级、兼容性矩阵 |
+| | [data-setup.md](environment/data-setup.md) | 数据获取和初始化：下载、验证数据集 |
 | [verification.md](environment/verification.md) | 环境验证：功能测试、exp_000 使用说明 |
+| | [troubleshooting.md](environment/troubleshooting.md) | 环境故障排查：常见问题、解决方案 |
 | [specs.md](environment/specs.md) | 环境规格：硬件配置、软件版本 |
 
 ---
@@ -54,7 +56,7 @@
 | [management.md](experiments/management.md) | 实验管理：记录、追踪、对比、清理策略 |
 | [project-structure.md](experiments/project-structure.md) | 项目结构：目录规范、模块导入、配置管理 |
 | [exp-001-overview.md](experiments/exp-001-overview.md) | 实验详解：数据集统计与探索完整说明 |
-| [fineweb_stats.md](experiments/fineweb_stats.md) | 实验案例：FineWeb-Edu 统计实验详细分析 |
+| [exp-001-fineweb-example.md](experiments/exp-001-fineweb-example.md) | 实验案例：FineWeb-Edu 统计实验案例分析 |
 
 ---
 
@@ -82,11 +84,14 @@ python -m experiments.001 --dataset <name> --batch-size 64
 使用 `-m` 参数运行实验模块：
 
 ```bash
-# 环境验证
+# 环境验证 ✅ 已验证
 python -m experiments.000
 
-# 数据集统计
-python -m experiments.001 explore --dataset HuggingFaceFW/fineweb-edu --workers 8
+# 数据集统计（单数据集） ✅ 已验证
+python -m experiments.001 --dataset HuggingFaceFW/fineweb-edu --workers 8
+
+# 数据集统计（所有有 score 的数据集） ✅ 已验证
+python -m experiments.001 --dataset all --workers 8
 ```
 
 详见：[开始实验](experiments/getting-started.md)
@@ -120,7 +125,11 @@ python -m experiments.000
 
 **运行**：
 ```bash
-python -m experiments.001 explore --dataset all --workers 8
+# 所有有 score 的数据集 ✅ 已验证
+python -m experiments.001 --dataset all --workers 8
+
+# 指定数据集 ✅ 已验证
+python -m experiments.001 --dataset HuggingFaceFW/fineweb-edu --workers 8
 ```
 
 **支持的数据集**：
@@ -165,10 +174,13 @@ ruff check --fix .
 ### 实验运行
 
 ```bash
-# 运行实验
-python -m experiments.001 explore --dataset <name> --workers 8
+# 运行实验（数据集统计） ✅ 已验证
+python -m experiments.001 --dataset <name> --workers 8
 
-# 查看实验帮助
+# 运行所有有 score 的数据集 ✅ 已验证
+python -m experiments.001 --dataset all --workers 8
+
+# 查看实验帮助 ✅ 已验证
 python -m experiments.001 --help
 
 # 运行并保存日志
@@ -218,6 +230,14 @@ python -m experiments.001 2>&1 | tee outputs/logs/exp_001.log
 
 ---
 
+
+## 快速修复路径
+
+遇到环境或实验问题？快速导航到解决方案：
+
+- [环境故障排查指南](environment/troubleshooting.md) - 完整的故障排查流程和解决方案
+- [exp-001 故障排查](experiments/exp-001-overview.md#故障排查) - 数据集统计实验的常见问题
+
 ## 相关资源
 
 - [PyTorch Documentation](https://pytorch.org/docs/stable/)
@@ -226,4 +246,3 @@ python -m experiments.001 2>&1 | tee outputs/logs/exp_001.log
 
 ---
 
-**最后更新**: 2026-01-31
