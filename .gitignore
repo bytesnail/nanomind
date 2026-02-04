@@ -8,3 +8,6 @@ uv.lock
 # IDE
 .vscode/
 .idea/
+
+# datasets
+data/datasets/

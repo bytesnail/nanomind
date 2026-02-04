@@ -34,6 +34,18 @@ uv pip compile pyproject.toml -o requirements.txt
 uv pip install -r requirements.txt
 ```
 
-**工作流**：`uv add --no-sync` → `uv pip compile` → `uv pip install`
+**工作流**：`uv add --dev <dev-package-name> --no-sync` / `uv add <package-name> --no-sync` → `uv pip compile pyproject.toml -o requirements.txt` → `uv pip install -r requirements.txt`
 
-**注意**：修改 `pyproject.toml` 后需重新编译 requirements.txt
+**注意**：修改 `pyproject.toml` 后需重新编译并输出最新的 requirements.txt 文件
+
+## 数据集
+
+预下载数据集位于 `data/datasets/` 目录，使用 `hfd` 脚本下载：
+
+| 数据集 | 路径 |
+|--------|------|
+| HuggingFaceFW/fineweb-edu | `data/datasets/HuggingFaceFW/fineweb-edu` |
+| opencsg/Fineweb-Edu-Chinese-V2.1 | `data/datasets/opencsg/Fineweb-Edu-Chinese-V2.1` |
+| HuggingFaceTB/finemath | `data/datasets/HuggingFaceTB/finemath` |
+| nvidia/Nemotron-CC-Math-v1 | `data/datasets/nvidia/Nemotron-CC-Math-v1` |
+| nick007x/github-code-2025 | `data/datasets/nick007x/github-code-2025` |
