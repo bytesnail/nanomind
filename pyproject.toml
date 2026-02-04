@@ -1,0 +1,22 @@
+[project]
+name = "nanomind"
+version = "0.1.0"
+description = "深度学习、大语言模型学习与试验"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=4.5.0",
+    "datatrove[all]>=0.8.0",
+    "matplotlib>=3.10.8",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "tqdm>=4.67.3",
+    "transformers>=5.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.1.0",
+    "pytest>=9.0.2",
+    "ruff>=0.15.0",
+]

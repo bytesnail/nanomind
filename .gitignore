@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# uv lockfile (not using uv project features)
+uv.lock
+
+# IDE
+.vscode/
+.idea/
