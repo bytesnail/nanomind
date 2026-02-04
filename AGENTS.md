@@ -87,7 +87,7 @@ nanomind/
 conda create -n nanomind python=3.13 -y
 conda activate nanomind
 conda install -c conda-forge uv -y
-conda install -c nvidia cuda=12.9 -y  # GPU 可选
+conda install -c nvidia cuda=12.9 -y
 ```
 
 ## 注意事项
