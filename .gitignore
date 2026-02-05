@@ -10,7 +10,7 @@ uv.lock
 .idea/
 
 # datasets
-data/datasets/
+data/datasets
 
 # oh-my-opencode
 .sisyphus/
