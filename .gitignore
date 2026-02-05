@@ -11,3 +11,6 @@ uv.lock
 
 # datasets
 data/datasets/
+
+# oh-my-opencode
+.sisyphus/
