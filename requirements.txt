@@ -51,6 +51,8 @@ babel==2.18.0
     # via
     #   courlan
     #   sphinx
+bitarray==3.8.0
+    # via pybloom-live
 blinker==1.9.0
     # via flask
 blis==1.3.3
@@ -541,6 +543,8 @@ pybind11==3.0.1
     # via
     #   fasttext-numpy2-wheel
     #   pyidaungsu-numpy2
+pybloom-live==4.0.0
+    # via nanomind (pyproject.toml)
 pycparser==3.0
     # via cffi
 pydantic==2.12.4
@@ -880,6 +884,7 @@ xxhash==3.6.0
     # via
     #   datasets
     #   datatrove
+    #   pybloom-live
 yarl==1.22.0
     # via aiohttp
 zipp==3.23.0
