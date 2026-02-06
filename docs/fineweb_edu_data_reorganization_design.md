@@ -51,7 +51,7 @@ data/datasets/fineweb/
             └── {rank}.parquet
 ```
 
-**字段筛选**：输出保留 `id`、`text` 两个顶层字段，以及 `metadata` 中的 `score` 字段（用于后续验证和统计）。
+**字段筛选**：输出保留 `id`、`text`、`score` 三个顶层字段，score 字段与 id、text 并列，便于直接访问和使用。
 
 **预期效果**（基于 score≥2 版本的 4.2 TB 原始数据）：
 - 预估采样后数据量约为原始数据的 **35%**（未压缩约 **450 GB**）
@@ -192,7 +192,7 @@ def fineweb_adapter(raw_dict: dict) -> Document:
         raw_dict: 原始 parquet 行数据（包含 10 个字段）
         
     Returns:
-        Document: 仅包含 id, text, metadata.score, metadata.cc_main
+        Document: 包含 id, text, score 三个顶层字段，以及 metadata.cc_main
     """
     # 从 dump 字段提取 CC-MAIN 快照批次名称（如 "CC-MAIN-2024-10"）
     dump = raw_dict.get("dump", "")
@@ -201,9 +201,9 @@ def fineweb_adapter(raw_dict: dict) -> Document:
     return Document(
         text=raw_dict.get("text", ""),
         id=raw_dict.get("id", ""),
+        score=raw_dict.get("score", 0.0),  # score 作为顶层字段
         metadata={
-            "score": raw_dict.get("score", 0.0),
-            "cc_main": cc_main,
+            "cc_main": cc_main,  # cc_main 保留在 metadata 中用于路径构建
         }
     )
 
@@ -361,11 +361,11 @@ class ScoreFilter(PipelineStep):
 
 #### 3.3.2 MetadataCleaner（元数据清理器）
 
-**说明**：字段筛选已在 `fineweb_adapter` 中完成，此组件用于最终清理，只保留 `score` 字段。
+**说明**：字段筛选已在 `fineweb_adapter` 中完成，此组件用于最终清理，移除 `cc_main` 元数据。
 
 **设计要点**：
-- 输入字段：`id`、`text`、`metadata.score`、`metadata.cc_main`
-- 输出字段：`id`、`text`、`metadata.score`（`cc_main` 用于路径构建后移除）
+- 输入字段：`id`、`text`、`score`（顶层字段）、`metadata.cc_main`
+- 输出字段：`id`、`text`、`score`（`cc_main` 用于路径构建后移除）
 
 **实现逻辑**：
 ```python
@@ -627,7 +627,7 @@ data/datasets/fineweb/
 | **中间文件** | 直接输出到目标目录 | 依赖 Datatrove 断点续传，无需临时目录 |
 | **压缩格式** | zstd | 高压缩率，快速解压，与原始数据格式一致 |
 | **区间定义** | 左闭右开 `[min, max)` | 确保边界值（3.0、3.5、4.0）归属唯一，避免重复或遗漏 |
-| **字段保留** | `id`, `text`, `metadata.score` | `score` 保留在 metadata 中用于后续验证和统计 |
+| **字段保留** | `id`, `text`, `score`（顶层字段） | `score` 与 `id`、`text` 并列，便于直接访问 |
 
 ### 4.3 配置参数
 
@@ -906,7 +906,7 @@ nanomind/
 
 | 验证项 | 方法 | 工具/脚本 | 成功标准 |
 |--------|------|----------|----------|
-| 字段完整性 | 检查 parquet 文件包含 id、text、metadata.score | `validate_output.py --check-schema` | 100% 记录包含所有必需字段 |
+| 字段完整性 | 检查 parquet 文件包含 id、text、score（顶层字段） | `validate_output.py --check-schema` | 100% 记录包含所有必需字段 |
 | 采样比例 | 抽样统计各桶实际采样率 | `validate_output.py --check-sampling` | 误差 < 1% |
 | 去重效果 | 统计重复文档数量 | `validate_output.py --check-duplicates` | 重复率 < 0.5% |
 | 文件完整性 | 检查 parquet 文件可读、无损坏 | `validate_output.py --check-files` | 100% 文件可读 |
@@ -1022,129 +1022,9 @@ def contains(score: float, min_score: float, max_score: float | None) -> bool:
     return (score >= min_score - epsilon) and (score < max_score - epsilon)
 ```
 
-### 8.3 资源不足降级方案
-
-**内存不足检测与降级**：
-```python
-import psutil
-
-def check_memory():
-    """检查内存使用情况"""
-    mem = psutil.virtual_memory()
-    if mem.percent > 90:
-        logger.warning("内存使用率超过 90%，建议减少 workers 数量")
-        return False
-    return True
-
-# 在 ScoreFilter 中支持降级
-if not check_memory() and self.use_bloom_filter:
-    logger.warning("内存不足，禁用 Bloom Filter 去重")
-    self.use_bloom_filter = False
-```
-
-**磁盘满检测**：
-```python
-import shutil
-
-def check_disk_space(path: Path, min_gb: int = 100):
-    """检查磁盘空间"""
-    stat = shutil.disk_usage(path)
-    free_gb = stat.free / (1024**3)
-    if free_gb < min_gb:
-        raise RuntimeError(f"磁盘空间不足：仅剩 {free_gb:.1f} GB，需要至少 {min_gb} GB")
-```
-
 ---
 
-## 9. 运维与监控
-
-### 9.1 监控指标体系
-
-**系统级指标**：
-
-| 指标名称 | 采集方式 | 告警阈值 | 说明 |
-|---------|---------|---------|------|
-| CPU 使用率 | `psutil.cpu_percent()` | > 90% 持续 5 分钟 | 系统负载过高 |
-| 内存使用率 | `psutil.virtual_memory().percent` | > 85% | 内存不足风险 |
-| 磁盘剩余空间 | `shutil.disk_usage()` | < 200 GB | 存储空间不足 |
-| 磁盘 I/O 速率 | `psutil.disk_io_counters()` | - | 监控 I/O 瓶颈 |
-
-**业务级指标**：
-
-| 指标名称 | 采集方式 | 正常范围 | 说明 |
-|---------|---------|---------|------|
-| 处理速率 | Datatrove 统计 | > 1000 条/秒 | 文档处理速度 |
-| 错误率 | 错误数/总数 | < 1% | 可恢复错误比例 |
-| 采样率偏差 | 实际/目标 | 误差 < 1% | 采样准确性 |
-| 去重率 | 重复数/总数 | < 5% | 重复文档比例 |
-
-### 9.2 监控脚本示例
-
-```python
-#!/usr/bin/env python3
-"""FineWeb-Edu 处理监控脚本"""
-
-import time
-import psutil
-import shutil
-from pathlib import Path
-from datetime import datetime
-
-def monitor_processing(
-    output_path: Path,
-    log_interval: int = 60,
-    check_disk_interval: int = 300,
-):
-    """监控数据处理过程。
-    
-    Args:
-        output_path: 输出目录路径
-        log_interval: 日志记录间隔（秒）
-        check_disk_interval: 磁盘检查间隔（秒）
-    """
-    last_disk_check = 0
-    
-    while True:
-        now = time.time()
-        
-        # 系统资源监控
-        cpu = psutil.cpu_percent(interval=1)
-        mem = psutil.virtual_memory()
-        
-        log_msg = f"[{datetime.now().isoformat()}] "
-        log_msg += f"CPU: {cpu:.1f}%, MEM: {mem.percent:.1f}%"
-        
-        # 磁盘空间检查
-        if now - last_disk_check > check_disk_interval:
-            disk = shutil.disk_usage(output_path)
-            free_gb = disk.free / (1024**3)
-            log_msg += f", DISK_FREE: {free_gb:.1f} GB"
-            
-            if free_gb < 200:
-                print(f"⚠️ 警告：磁盘空间不足，仅剩 {free_gb:.1f} GB")
-            
-            last_disk_check = now
-        
-        print(log_msg)
-        time.sleep(log_interval)
-
-if __name__ == "__main__":
-    import sys
-    output_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/datasets/fineweb")
-    monitor_processing(output_path)
-```
-
-### 9.3 日志管理
-
-日志格式和级别使用场景参见第 4.4 节"错误处理策略"。
-
-**日志文件位置**：
-- 处理日志：`logs/fineweb_processing/{bucket_name}/`
-- 监控日志：`logs/monitoring/`
-
----
-
-## 10. 下游使用规范
+## 9. 下游使用规范
 
 ### 10.1 数据加载示例
 
