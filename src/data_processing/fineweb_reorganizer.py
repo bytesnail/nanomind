@@ -1,4 +1,4 @@
-"""FineWeb-Edu 数据集重组主入口模块。"""
+"""FineWeb-Edu 数据集重组主入口。"""
 
 import argparse
 import logging
@@ -25,7 +25,6 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 
 def _setup_logging(log_dir: Path, bucket_name: str) -> logging.Logger:
-    """设置日志记录。"""
     log_dir = log_dir / bucket_name
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,7 +54,6 @@ def _create_pipeline(
     ] = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
 ) -> LocalPipelineExecutor:
-    """创建单个评分桶的 Pipeline。"""
     pipeline = [
         ParquetReader(
             str(input_path),
@@ -94,7 +92,6 @@ def _process_single_bucket(
     ] = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
 ) -> str:
-    """处理单个评分桶。"""
     output_path = output_base / bucket.name
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -128,7 +125,6 @@ def process_all_buckets(
     max_file_size: int = DEFAULT_MAX_SIZE,
     buckets: list[BucketConfig] | None = None,
 ) -> list[str]:
-    """处理所有评分桶。"""
     buckets = buckets or get_all_bucket_configs()
 
     if parallel_buckets == 1:
@@ -163,7 +159,6 @@ def process_all_buckets(
 
 
 def main() -> int:
-    """主入口函数。"""
     parser = argparse.ArgumentParser(
         description="FineWeb-Edu 数据集质量评分分桶重组工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,

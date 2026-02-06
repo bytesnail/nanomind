@@ -1,4 +1,4 @@
-"""FineWeb-Edu 数据重组试运行脚本。"""
+"""FineWeb-Edu 数据重组试运行。"""
 
 import argparse
 import json
@@ -26,7 +26,6 @@ SAMPLING_RATES = {"2.8": 0.30, "3.0": 0.60, "3.5": 0.80, "4.0": 1.0}
 def _create_test_dataset(
     source_dir: Path, output_dir: Path, max_files: int = 5, max_rows: int = 2000
 ) -> dict:
-    """创建测试数据集。"""
     output_dir.mkdir(parents=True, exist_ok=True)
     parquet_files = list(source_dir.rglob("*.parquet"))[:max_files]
     logger.info(f"选择 {len(parquet_files)} 个文件用于测试")
@@ -69,7 +68,6 @@ def _create_test_dataset(
 def _run_processing(
     input_dir: Path, output_dir: Path, workers: int = 2, seed: int = 42
 ) -> dict:
-    """运行试运行处理。"""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("=" * 60)
@@ -95,7 +93,6 @@ def _run_processing(
 
 
 def _validate_results(output_dir: Path) -> dict:
-    """验证试运行结果。"""
     logger.info("=" * 60)
     logger.info("开始验证结果")
     logger.info("=" * 60)
@@ -128,8 +125,21 @@ def _validate_results(output_dir: Path) -> dict:
     return results
 
 
+def _count_by_bucket(scores: list[float]) -> dict[str, int]:
+    counts = {"2.8": 0, "3.0": 0, "3.5": 0, "4.0": 0}
+    for score in scores:
+        if 2.8 <= score < 3.0:
+            counts["2.8"] += 1
+        elif 3.0 <= score < 3.5:
+            counts["3.0"] += 1
+        elif 3.5 <= score < 4.0:
+            counts["3.5"] += 1
+        elif score >= 4.0:
+            counts["4.0"] += 1
+    return counts
+
+
 def _analyze_sampling(input_dir: Path, output_dir: Path) -> dict:
-    """分析采样准确性。"""
     logger.info("=" * 60)
     logger.info("分析采样准确性")
     logger.info("=" * 60)
@@ -140,25 +150,18 @@ def _analyze_sampling(input_dir: Path, output_dir: Path) -> dict:
     for parquet_file in tqdm(list(input_dir.rglob("*.parquet"))[:10], desc="统计输入"):
         try:
             table = pq.read_table(parquet_file, columns=["score"])
-            for score in table.column("score").to_pylist():
-                if 2.8 <= score < 3.0:
-                    input_counts["2.8"] += 1
-                elif 3.0 <= score < 3.5:
-                    input_counts["3.0"] += 1
-                elif 3.5 <= score < 4.0:
-                    input_counts["3.5"] += 1
-                elif score >= 4.0:
-                    input_counts["4.0"] += 1
+            scores = table.column("score").to_pylist()
+            for bucket, count in _count_by_bucket(scores).items():
+                input_counts[bucket] += count
         except Exception as e:
             logger.warning(f"读取文件 {parquet_file} 失败: {e}")
 
-    for bucket_name in ["2.8", "3.0", "3.5", "4.0"]:
+    for bucket_name in output_counts:
         bucket_dir = output_dir / bucket_name
         if bucket_dir.exists():
             for parquet_file in bucket_dir.rglob("*.parquet"):
                 try:
-                    table = pq.read_table(parquet_file)
-                    output_counts[bucket_name] += table.num_rows
+                    output_counts[bucket_name] += pq.read_table(parquet_file).num_rows
                 except Exception as e:
                     logger.warning(f"读取文件 {parquet_file} 失败: {e}")
 
@@ -189,7 +192,6 @@ def _analyze_sampling(input_dir: Path, output_dir: Path) -> dict:
 
 
 def main() -> int:
-    """主入口函数。"""
     parser = argparse.ArgumentParser(
         description="FineWeb-Edu 数据重组试运行",
         formatter_class=argparse.RawDescriptionHelpFormatter,

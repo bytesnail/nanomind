@@ -1,4 +1,4 @@
-"""FineWeb-Edu 重组结果验证脚本。"""
+"""FineWeb-Edu 重组结果验证。"""
 
 import argparse
 import json
@@ -14,7 +14,6 @@ REQUIRED_FIELDS = {"id", "text", "score"}
 
 
 def _validate_schema(file_path: Path) -> tuple[bool, list[str]]:
-    """验证 parquet 文件的 schema。"""
     try:
         table = pq.read_table(file_path)
         columns = set(table.column_names)
@@ -26,7 +25,6 @@ def _validate_schema(file_path: Path) -> tuple[bool, list[str]]:
 
 
 def _validate_integrity(file_path: Path) -> tuple[bool, list[str]]:
-    """验证 parquet 文件完整性。"""
     if file_path.stat().st_size == 0:
         return False, ["文件大小为 0"]
     try:
@@ -39,7 +37,6 @@ def _validate_integrity(file_path: Path) -> tuple[bool, list[str]]:
 
 
 def _validate_score_range(file_path: Path, bucket_name: str) -> tuple[bool, list[str]]:
-    """验证文件中的评分是否在对应桶的范围内。"""
     try:
         bucket = get_bucket_config(bucket_name)
     except ValueError:
@@ -64,7 +61,6 @@ def _validate_score_range(file_path: Path, bucket_name: str) -> tuple[bool, list
 
 
 def _collect_stats(bucket_path: Path) -> dict:
-    """收集评分桶的统计信息。"""
     stats = {
         "file_count": 0,
         "record_count": 0,
@@ -92,7 +88,6 @@ def _collect_stats(bucket_path: Path) -> dict:
 
 
 def _validate_bucket(bucket_path: Path, bucket_name: str) -> dict:
-    """验证单个评分桶。"""
     result = {
         "bucket_name": bucket_name,
         "valid": True,
@@ -137,7 +132,6 @@ def _validate_bucket(bucket_path: Path, bucket_name: str) -> dict:
 
 
 def _validate_all(base_path: Path) -> dict:
-    """验证所有评分桶。"""
     buckets = get_all_bucket_configs()
     results = {
         "valid": True,
@@ -171,7 +165,6 @@ def _validate_all(base_path: Path) -> dict:
 
 
 def _print_report(results: dict, verbose: bool = False) -> None:
-    """打印验证报告。"""
     print("\n" + "=" * 60)
     print("FineWeb-Edu 重组验证报告")
     print("=" * 60)
@@ -204,7 +197,6 @@ def _print_report(results: dict, verbose: bool = False) -> None:
 
 
 def main() -> int:
-    """主入口函数。"""
     parser = argparse.ArgumentParser(
         description="验证 FineWeb-Edu 重组结果",
         formatter_class=argparse.RawDescriptionHelpFormatter,
