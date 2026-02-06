@@ -1,4 +1,4 @@
-"""CC-MAIN 路径写入器。"""
+"""CC-MAIN 路径写入器模块。"""
 
 from typing import Literal
 

@@ -1,4 +1,4 @@
-"""FineWeb-Edu 数据集重组主入口。"""
+"""FineWeb-Edu 数据集重组主入口模块。"""
 
 import argparse
 import logging
