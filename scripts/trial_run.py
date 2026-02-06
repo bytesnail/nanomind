@@ -1,7 +1,4 @@
-"""FineWeb-Edu 数据重组试运行脚本。
-
-使用小规模测试数据验证整个处理流程的正确性。
-"""
+"""FineWeb-Edu 数据重组试运行脚本。"""
 
 import argparse
 import json
@@ -26,19 +23,7 @@ def create_test_dataset(
     max_files: int = 5,
     max_rows_per_file: int = 2000,
 ) -> dict:
-    """创建测试数据集。
-
-    从原始数据中提取少量样本，覆盖不同评分区间。
-
-    Args:
-        source_dir: 源数据目录
-        output_dir: 输出目录
-        max_files: 最大文件数
-        max_rows_per_file: 每个文件最大行数
-
-    Returns:
-        dict: 测试数据统计信息
-    """
+    """创建测试数据集。"""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     parquet_files = list(source_dir.rglob("*.parquet"))
@@ -46,34 +31,27 @@ def create_test_dataset(
 
     logger.info(f"选择 {len(selected_files)} 个文件用于测试")
 
-    stats = {
-        "total_files": 0,
-        "total_rows": 0,
-        "score_distribution": {},
-    }
+    stats = {"total_files": 0, "total_rows": 0, "score_distribution": {}}
 
     for i, file_path in enumerate(selected_files):
         try:
             table = pq.read_table(file_path)
-            df = table.to_pandas()
+            df = table.to_pandas().head(max_rows_per_file)
 
-            # 只取前 N 行
-            df = df.head(max_rows_per_file)
-
-            # 统计评分分布
             if "score" in df.columns:
                 for score in df["score"]:
-                    bucket = get_score_bucket(score)
-                    stats["score_distribution"][bucket] = (
-                        stats["score_distribution"].get(bucket, 0) + 1
+                    from src.data_processing.bucket_config import find_bucket_for_score
+
+                    bucket = find_bucket_for_score(score)
+                    bucket_name = bucket.name if bucket else "<2.8"
+                    stats["score_distribution"][bucket_name] = (
+                        stats["score_distribution"].get(bucket_name, 0) + 1
                     )
 
-            # 构建输出路径，保持目录结构
             relative_path = file_path.relative_to(source_dir)
             output_path = output_dir / relative_path
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # 保存为 parquet
             df.to_parquet(output_path, compression="zstd")
 
             stats["total_files"] += 1
@@ -93,35 +71,13 @@ def create_test_dataset(
     return stats
 
 
-def get_score_bucket(score: float) -> str:
-    from src.data_processing.bucket_config import find_bucket_for_score
-
-    bucket = find_bucket_for_score(score)
-    if bucket is None:
-        return "<2.8"
-    return bucket.name
-
-
 def run_trial_processing(
     input_dir: Path,
     output_dir: Path,
     workers: int = 2,
     random_seed: int = 42,
 ) -> dict:
-    """运行试运行处理。
-
-    Args:
-        input_dir: 输入目录
-        output_dir: 输出目录
-        workers: worker 数量
-        random_seed: 随机种子
-
-    Returns:
-        dict: 处理结果统计
-    """
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent))
+    """运行试运行处理。"""
     from src.data_processing.fineweb_reorganizer import process_all_buckets
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -134,35 +90,22 @@ def run_trial_processing(
     logger.info(f"随机种子: {random_seed}")
     logger.info("=" * 60)
 
-    # 运行处理
     results = process_all_buckets(
         input_path=input_dir,
         output_base=output_dir,
         workers_per_bucket=workers,
         random_seed=random_seed,
-        parallel_buckets=1,  # 顺序处理，便于调试
+        parallel_buckets=1,
         compression="zstd",
-        max_file_size=128 * 1024 * 1024,  # 128MB 用于测试
+        max_file_size=128 * 1024 * 1024,
     )
 
     logger.info(f"处理完成: {results}")
-
     return {"processed_buckets": results}
 
 
-def validate_trial_results(
-    output_dir: Path,
-    expected_buckets: list[str],
-) -> dict:
-    """验证试运行结果。
-
-    Args:
-        output_dir: 输出目录
-        expected_buckets: 期望的桶列表
-
-    Returns:
-        dict: 验证结果
-    """
+def validate_trial_results(output_dir: Path) -> dict:
+    """验证试运行结果。"""
     from scripts.validate_output import validate_all_buckets
 
     logger.info("=" * 60)
@@ -171,7 +114,6 @@ def validate_trial_results(
 
     results = validate_all_buckets(output_dir)
 
-    # 打印验证报告
     print("\n" + "=" * 60)
     print("试运行验证报告")
     print("=" * 60)
@@ -192,47 +134,25 @@ def validate_trial_results(
     print(f"  记录数: {results['summary']['total_records']:,}")
     print(f"  总大小: {results['summary']['total_size_gb']:.2f} GB")
     print(f"  错误数: {results['summary']['total_errors']}")
-
-    if results["valid"]:
-        print("\n✅ 验证通过")
-    else:
-        print("\n❌ 验证失败")
-
+    print(f"\n{'✅ 验证通过' if results['valid'] else '❌ 验证失败'}")
     print("=" * 60)
 
     return results
 
 
-def analyze_sampling_accuracy(
-    input_dir: Path,
-    output_dir: Path,
-) -> dict:
-    """分析采样准确性。
-
-    比较输入和输出的评分分布，验证采样率是否符合预期。
-
-    Args:
-        input_dir: 输入目录
-        output_dir: 输出目录
-
-    Returns:
-        dict: 采样准确性分析结果
-    """
+def analyze_sampling_accuracy(input_dir: Path, output_dir: Path) -> dict:
+    """分析采样准确性。"""
     logger.info("=" * 60)
     logger.info("分析采样准确性")
     logger.info("=" * 60)
 
-    # 统计输入数据的评分分布
     input_scores = {"2.8": 0, "3.0": 0, "3.5": 0, "4.0": 0}
     output_counts = {"2.8": 0, "3.0": 0, "3.5": 0, "4.0": 0}
 
-    # 读取输入文件统计
     for parquet_file in tqdm(list(input_dir.rglob("*.parquet"))[:10], desc="统计输入"):
         try:
             table = pq.read_table(parquet_file, columns=["score"])
-            scores = table.column("score").to_pylist()
-
-            for score in scores:
+            for score in table.column("score").to_pylist():
                 if 2.8 <= score < 3.0:
                     input_scores["2.8"] += 1
                 elif 3.0 <= score < 3.5:
@@ -244,7 +164,6 @@ def analyze_sampling_accuracy(
         except Exception as e:
             logger.warning(f"读取文件 {parquet_file} 失败: {e}")
 
-    # 统计输出文件
     for bucket_name in ["2.8", "3.0", "3.5", "4.0"]:
         bucket_dir = output_dir / bucket_name
         if bucket_dir.exists():
@@ -255,7 +174,6 @@ def analyze_sampling_accuracy(
                 except Exception as e:
                     logger.warning(f"读取文件 {parquet_file} 失败: {e}")
 
-    # 计算实际采样率
     sampling_rates = {"2.8": 0.30, "3.0": 0.60, "3.5": 0.80, "4.0": 1.0}
 
     print("\n采样准确性分析:")
@@ -276,20 +194,13 @@ def analyze_sampling_accuracy(
             print(f"  期望采样率: {expected_rate:.0%}")
             print(f"  实际采样率: {actual_rate:.2%}")
             print(f"  误差: {error_rate:.2f}%")
-
-            if error_rate < 5.0:
-                print("  状态: ✅ 通过 (误差 < 5%)")
-            else:
-                print("  状态: ⚠️ 偏差较大")
+            print(f"  状态: {'✅ 通过' if error_rate < 5.0 else '⚠️ 偏差较大'}")
         else:
             print(f"\n桶 {bucket_name}: 无输入数据")
 
     print("-" * 60)
 
-    return {
-        "input_scores": input_scores,
-        "output_counts": output_counts,
-    }
+    return {"input_scores": input_scores, "output_counts": output_counts}
 
 
 def main() -> int:
@@ -299,7 +210,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 完整试运行（创建测试数据 + 处理 + 验证）
+  # 完整试运行
   python scripts/trial_run.py
 
   # 使用已有测试数据
@@ -314,64 +225,21 @@ def main() -> int:
         "--source",
         type=Path,
         default=Path("data/datasets/HuggingFaceFW/fineweb-edu/data"),
-        help="源数据目录",
     )
     parser.add_argument(
-        "--test-input",
-        type=Path,
-        default=Path("data/datasets/test_fineweb_input"),
-        help="测试输入目录",
+        "--test-input", type=Path, default=Path("data/datasets/test_fineweb_input")
     )
     parser.add_argument(
-        "--test-output",
-        type=Path,
-        default=Path("data/datasets/test_fineweb_output"),
-        help="测试输出目录",
+        "--test-output", type=Path, default=Path("data/datasets/test_fineweb_output")
     )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=2,
-        help="worker 数量（默认：2）",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="随机种子（默认：42）",
-    )
-    parser.add_argument(
-        "--max-files",
-        type=int,
-        default=5,
-        help="测试数据最大文件数（默认：5）",
-    )
-    parser.add_argument(
-        "--max-rows",
-        type=int,
-        default=2000,
-        help="每个文件最大行数（默认：2000）",
-    )
-    parser.add_argument(
-        "--skip-create-test",
-        action="store_true",
-        help="跳过创建测试数据（使用已有测试数据）",
-    )
-    parser.add_argument(
-        "--skip-processing",
-        action="store_true",
-        help="跳过处理步骤（只验证已有输出）",
-    )
-    parser.add_argument(
-        "--analyze-sampling",
-        action="store_true",
-        help="分析采样准确性",
-    )
-    parser.add_argument(
-        "--json",
-        type=Path,
-        help="将结果保存为 JSON 文件",
-    )
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-files", type=int, default=5)
+    parser.add_argument("--max-rows", type=int, default=2000)
+    parser.add_argument("--skip-create-test", action="store_true")
+    parser.add_argument("--skip-processing", action="store_true")
+    parser.add_argument("--analyze-sampling", action="store_true")
+    parser.add_argument("--json", type=Path)
 
     args = parser.parse_args()
 
@@ -383,13 +251,11 @@ def main() -> int:
     }
 
     try:
-        # 步骤 1: 创建测试数据
         if not args.skip_create_test:
             if not args.source.exists():
                 logger.error(f"源数据目录不存在: {args.source}")
                 return 1
 
-            # 清理旧的测试数据
             if args.test_input.exists():
                 logger.info(f"清理旧的测试输入数据: {args.test_input}")
                 shutil.rmtree(args.test_input)
@@ -403,9 +269,7 @@ def main() -> int:
         else:
             logger.info("跳过创建测试数据")
 
-        # 步骤 2: 运行处理
         if not args.skip_processing:
-            # 清理旧的输出数据
             if args.test_output.exists():
                 logger.info(f"清理旧的测试输出数据: {args.test_output}")
                 shutil.rmtree(args.test_output)
@@ -419,14 +283,9 @@ def main() -> int:
         else:
             logger.info("跳过处理步骤")
 
-        # 步骤 3: 验证结果
         if args.test_output.exists():
-            results["validation_results"] = validate_trial_results(
-                output_dir=args.test_output,
-                expected_buckets=["2.8", "3.0", "3.5", "4.0"],
-            )
+            results["validation_results"] = validate_trial_results(args.test_output)
 
-            # 步骤 4: 分析采样准确性
             if args.analyze_sampling:
                 results["sampling_analysis"] = analyze_sampling_accuracy(
                     input_dir=args.test_input,
@@ -435,15 +294,11 @@ def main() -> int:
         else:
             logger.warning(f"输出目录不存在，跳过验证: {args.test_output}")
 
-        # 保存结果
         if args.json:
-            # 转换不可序列化的对象
-            json_results = json.dumps(results, indent=2, default=str)
             with open(args.json, "w", encoding="utf-8") as f:
-                f.write(json_results)
+                json.dump(results, f, indent=2, default=str)
             logger.info(f"结果已保存到: {args.json}")
 
-        # 返回退出码
         if results["validation_results"] and not results["validation_results"]["valid"]:
             return 1
 
