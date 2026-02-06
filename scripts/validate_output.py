@@ -10,28 +10,25 @@ from tqdm import tqdm
 
 from src.data_processing.bucket_config import get_all_bucket_configs, get_bucket_config
 
+REQUIRED_FIELDS = {"id", "text", "score"}
 
-def validate_schema(file_path: Path) -> tuple[bool, list[str]]:
+
+def _validate_schema(file_path: Path) -> tuple[bool, list[str]]:
     """验证 parquet 文件的 schema。"""
-    errors = []
     try:
         table = pq.read_table(file_path)
         columns = set(table.column_names)
-
-        required = {"id", "text", "score"}
-        if not required.issubset(columns):
-            errors.append(f"缺少必需字段: {required - columns}")
-
-        return len(errors) == 0, errors
+        if not REQUIRED_FIELDS.issubset(columns):
+            return False, [f"缺少必需字段: {REQUIRED_FIELDS - columns}"]
+        return True, []
     except Exception as e:
         return False, [f"读取失败: {e}"]
 
 
-def validate_file_integrity(file_path: Path) -> tuple[bool, list[str]]:
+def _validate_integrity(file_path: Path) -> tuple[bool, list[str]]:
     """验证 parquet 文件完整性。"""
     if file_path.stat().st_size == 0:
         return False, ["文件大小为 0"]
-
     try:
         table = pq.read_table(file_path)
         if table.num_rows == 0:
@@ -41,10 +38,8 @@ def validate_file_integrity(file_path: Path) -> tuple[bool, list[str]]:
         return False, [f"文件损坏: {e}"]
 
 
-def validate_score_range(file_path: Path, bucket_name: str) -> tuple[bool, list[str]]:
+def _validate_score_range(file_path: Path, bucket_name: str) -> tuple[bool, list[str]]:
     """验证文件中的评分是否在对应桶的范围内。"""
-    errors = []
-
     try:
         bucket = get_bucket_config(bucket_name)
     except ValueError:
@@ -52,7 +47,6 @@ def validate_score_range(file_path: Path, bucket_name: str) -> tuple[bool, list[
 
     try:
         table = pq.read_table(file_path)
-
         if "score" not in table.column_names:
             return False, ["缺少 score 字段"]
 
@@ -61,17 +55,15 @@ def validate_score_range(file_path: Path, bucket_name: str) -> tuple[bool, list[
 
         if out_of_range > 0:
             max_str = "+∞" if bucket.max_score is None else str(bucket.max_score)
-            errors.append(
+            return False, [
                 f"{out_of_range} 条记录不在范围 [{bucket.min_score}, {max_str})"
-            )
-
+            ]
+        return True, []
     except Exception as e:
-        errors.append(f"验证失败: {e}")
-
-    return len(errors) == 0, errors
+        return False, [f"验证失败: {e}"]
 
 
-def collect_bucket_stats(bucket_path: Path) -> dict:
+def _collect_stats(bucket_path: Path) -> dict:
     """收集评分桶的统计信息。"""
     stats = {
         "file_count": 0,
@@ -87,7 +79,6 @@ def collect_bucket_stats(bucket_path: Path) -> dict:
         try:
             table = pq.read_table(parquet_file)
             stats["record_count"] += table.num_rows
-
             cc_main = parquet_file.parent.name
             if cc_main.startswith("CC-MAIN-"):
                 stats["cc_main_batches"].add(cc_main)
@@ -100,7 +91,7 @@ def collect_bucket_stats(bucket_path: Path) -> dict:
     return stats
 
 
-def validate_bucket(bucket_path: Path, bucket_name: str) -> dict:
+def _validate_bucket(bucket_path: Path, bucket_name: str) -> dict:
     """验证单个评分桶。"""
     result = {
         "bucket_name": bucket_name,
@@ -124,26 +115,28 @@ def validate_bucket(bucket_path: Path, bucket_name: str) -> dict:
         result["errors"].append("桶中没有 parquet 文件")
         return result
 
+    validators = [
+        (_validate_integrity, "完整性"),
+        (_validate_schema, "Schema"),
+        (lambda p: _validate_score_range(p, bucket_name), "评分范围"),
+    ]
+
     for file_path in tqdm(parquet_files, desc=f"验证桶 {bucket_name}"):
-        for validator, error_prefix in [
-            (validate_file_integrity, "完整性"),
-            (validate_schema, "Schema"),
-            (lambda p: validate_score_range(p, bucket_name), "评分范围"),
-        ]:
+        for validator, prefix in validators:
             valid, errors = validator(file_path)
             if not valid:
                 result["valid"] = False
                 result["error_count"] += 1
                 result["errors"].extend(
-                    [f"{file_path} ({error_prefix}): {e}" for e in errors]
+                    [f"{file_path} ({prefix}): {e}" for e in errors]
                 )
                 break
 
-    result["stats"] = collect_bucket_stats(bucket_path)
+    result["stats"] = _collect_stats(bucket_path)
     return result
 
 
-def validate_all_buckets(base_path: Path) -> dict:
+def _validate_all(base_path: Path) -> dict:
     """验证所有评分桶。"""
     buckets = get_all_bucket_configs()
     results = {
@@ -159,7 +152,7 @@ def validate_all_buckets(base_path: Path) -> dict:
 
     for bucket in buckets:
         bucket_path = base_path / bucket.name
-        bucket_result = validate_bucket(bucket_path, bucket.name)
+        bucket_result = _validate_bucket(bucket_path, bucket.name)
         results["buckets"][bucket.name] = bucket_result
 
         if not bucket_result["valid"]:
@@ -177,7 +170,7 @@ def validate_all_buckets(base_path: Path) -> dict:
     return results
 
 
-def print_report(results: dict, verbose: bool = False) -> None:
+def _print_report(results: dict, verbose: bool = False) -> None:
     """打印验证报告。"""
     print("\n" + "=" * 60)
     print("FineWeb-Edu 重组验证报告")
@@ -217,13 +210,8 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 验证所有桶
   python scripts/validate_output.py --input data/datasets/fineweb/en
-
-  # 验证指定桶
   python scripts/validate_output.py --input data/datasets/fineweb/en --bucket 3.0
-
-  # 详细输出
   python scripts/validate_output.py --input data/datasets/fineweb/en --verbose
         """,
     )
@@ -243,7 +231,7 @@ def main() -> int:
 
     if args.bucket:
         bucket_path = args.input / args.bucket
-        bucket_result = validate_bucket(bucket_path, args.bucket)
+        bucket_result = _validate_bucket(bucket_path, args.bucket)
         results = {
             "valid": bucket_result["valid"],
             "buckets": {args.bucket: bucket_result},
@@ -255,9 +243,9 @@ def main() -> int:
             },
         }
     else:
-        results = validate_all_buckets(args.input)
+        results = _validate_all(args.input)
 
-    print_report(results, verbose=args.verbose)
+    _print_report(results, verbose=args.verbose)
 
     if args.json:
         for bucket_result in results["buckets"].values():

@@ -10,38 +10,36 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
+from src.data_processing.bucket_config import find_bucket_for_score
+from src.data_processing.fineweb_reorganizer import process_all_buckets
+from scripts.validate_output import _validate_all as validate_all_buckets
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
+SAMPLING_RATES = {"2.8": 0.30, "3.0": 0.60, "3.5": 0.80, "4.0": 1.0}
 
-def create_test_dataset(
-    source_dir: Path,
-    output_dir: Path,
-    max_files: int = 5,
-    max_rows_per_file: int = 2000,
+
+def _create_test_dataset(
+    source_dir: Path, output_dir: Path, max_files: int = 5, max_rows: int = 2000
 ) -> dict:
     """创建测试数据集。"""
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    parquet_files = list(source_dir.rglob("*.parquet"))
-    selected_files = parquet_files[:max_files]
-
-    logger.info(f"选择 {len(selected_files)} 个文件用于测试")
+    parquet_files = list(source_dir.rglob("*.parquet"))[:max_files]
+    logger.info(f"选择 {len(parquet_files)} 个文件用于测试")
 
     stats = {"total_files": 0, "total_rows": 0, "score_distribution": {}}
 
-    for i, file_path in enumerate(selected_files):
+    for i, file_path in enumerate(parquet_files):
         try:
             table = pq.read_table(file_path)
-            df = table.to_pandas().head(max_rows_per_file)
+            df = table.to_pandas().head(max_rows)
 
             if "score" in df.columns:
                 for score in df["score"]:
-                    from src.data_processing.bucket_config import find_bucket_for_score
-
                     bucket = find_bucket_for_score(score)
                     bucket_name = bucket.name if bucket else "<2.8"
                     stats["score_distribution"][bucket_name] = (
@@ -51,14 +49,12 @@ def create_test_dataset(
             relative_path = file_path.relative_to(source_dir)
             output_path = output_dir / relative_path
             output_path.parent.mkdir(parents=True, exist_ok=True)
-
             df.to_parquet(output_path, compression="zstd")
 
             stats["total_files"] += 1
             stats["total_rows"] += len(df)
-
             logger.info(
-                f"  [{i + 1}/{len(selected_files)}] {relative_path}: {len(df)} 行"
+                f"  [{i + 1}/{len(parquet_files)}] {relative_path}: {len(df)} 行"
             )
 
         except Exception as e:
@@ -67,19 +63,13 @@ def create_test_dataset(
     logger.info(f"测试数据集已创建: {output_dir}")
     logger.info(f"总计: {stats['total_files']} 个文件, {stats['total_rows']} 行")
     logger.info(f"评分分布: {stats['score_distribution']}")
-
     return stats
 
 
-def run_trial_processing(
-    input_dir: Path,
-    output_dir: Path,
-    workers: int = 2,
-    random_seed: int = 42,
+def _run_processing(
+    input_dir: Path, output_dir: Path, workers: int = 2, seed: int = 42
 ) -> dict:
     """运行试运行处理。"""
-    from src.data_processing.fineweb_reorganizer import process_all_buckets
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("=" * 60)
@@ -87,14 +77,14 @@ def run_trial_processing(
     logger.info(f"输入目录: {input_dir}")
     logger.info(f"输出目录: {output_dir}")
     logger.info(f"Workers: {workers}")
-    logger.info(f"随机种子: {random_seed}")
+    logger.info(f"随机种子: {seed}")
     logger.info("=" * 60)
 
     results = process_all_buckets(
         input_path=input_dir,
         output_base=output_dir,
         workers_per_bucket=workers,
-        random_seed=random_seed,
+        random_seed=seed,
         parallel_buckets=1,
         compression="zstd",
         max_file_size=128 * 1024 * 1024,
@@ -104,10 +94,8 @@ def run_trial_processing(
     return {"processed_buckets": results}
 
 
-def validate_trial_results(output_dir: Path) -> dict:
+def _validate_results(output_dir: Path) -> dict:
     """验证试运行结果。"""
-    from scripts.validate_output import validate_all_buckets
-
     logger.info("=" * 60)
     logger.info("开始验证结果")
     logger.info("=" * 60)
@@ -140,13 +128,13 @@ def validate_trial_results(output_dir: Path) -> dict:
     return results
 
 
-def analyze_sampling_accuracy(input_dir: Path, output_dir: Path) -> dict:
+def _analyze_sampling(input_dir: Path, output_dir: Path) -> dict:
     """分析采样准确性。"""
     logger.info("=" * 60)
     logger.info("分析采样准确性")
     logger.info("=" * 60)
 
-    input_scores = {"2.8": 0, "3.0": 0, "3.5": 0, "4.0": 0}
+    input_counts = {"2.8": 0, "3.0": 0, "3.5": 0, "4.0": 0}
     output_counts = {"2.8": 0, "3.0": 0, "3.5": 0, "4.0": 0}
 
     for parquet_file in tqdm(list(input_dir.rglob("*.parquet"))[:10], desc="统计输入"):
@@ -154,13 +142,13 @@ def analyze_sampling_accuracy(input_dir: Path, output_dir: Path) -> dict:
             table = pq.read_table(parquet_file, columns=["score"])
             for score in table.column("score").to_pylist():
                 if 2.8 <= score < 3.0:
-                    input_scores["2.8"] += 1
+                    input_counts["2.8"] += 1
                 elif 3.0 <= score < 3.5:
-                    input_scores["3.0"] += 1
+                    input_counts["3.0"] += 1
                 elif 3.5 <= score < 4.0:
-                    input_scores["3.5"] += 1
+                    input_counts["3.5"] += 1
                 elif score >= 4.0:
-                    input_scores["4.0"] += 1
+                    input_counts["4.0"] += 1
         except Exception as e:
             logger.warning(f"读取文件 {parquet_file} 失败: {e}")
 
@@ -174,15 +162,13 @@ def analyze_sampling_accuracy(input_dir: Path, output_dir: Path) -> dict:
                 except Exception as e:
                     logger.warning(f"读取文件 {parquet_file} 失败: {e}")
 
-    sampling_rates = {"2.8": 0.30, "3.0": 0.60, "3.5": 0.80, "4.0": 1.0}
-
     print("\n采样准确性分析:")
     print("-" * 60)
 
     for bucket_name in ["2.8", "3.0", "3.5", "4.0"]:
-        input_count = input_scores[bucket_name]
+        input_count = input_counts[bucket_name]
         output_count = output_counts[bucket_name]
-        expected_rate = sampling_rates[bucket_name]
+        expected_rate = SAMPLING_RATES[bucket_name]
 
         if input_count > 0:
             actual_rate = output_count / input_count
@@ -199,8 +185,7 @@ def analyze_sampling_accuracy(input_dir: Path, output_dir: Path) -> dict:
             print(f"\n桶 {bucket_name}: 无输入数据")
 
     print("-" * 60)
-
-    return {"input_scores": input_scores, "output_counts": output_counts}
+    return {"input_scores": input_counts, "output_counts": output_counts}
 
 
 def main() -> int:
@@ -210,13 +195,8 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 完整试运行
   python scripts/trial_run.py
-
-  # 使用已有测试数据
   python scripts/trial_run.py --skip-create-test
-
-  # 指定 workers
   python scripts/trial_run.py --workers 4
         """,
     )
@@ -260,11 +240,11 @@ def main() -> int:
                 logger.info(f"清理旧的测试输入数据: {args.test_input}")
                 shutil.rmtree(args.test_input)
 
-            results["test_data_stats"] = create_test_dataset(
+            results["test_data_stats"] = _create_test_dataset(
                 source_dir=args.source,
                 output_dir=args.test_input,
                 max_files=args.max_files,
-                max_rows_per_file=args.max_rows,
+                max_rows=args.max_rows,
             )
         else:
             logger.info("跳过创建测试数据")
@@ -274,20 +254,20 @@ def main() -> int:
                 logger.info(f"清理旧的测试输出数据: {args.test_output}")
                 shutil.rmtree(args.test_output)
 
-            results["processing_results"] = run_trial_processing(
+            results["processing_results"] = _run_processing(
                 input_dir=args.test_input,
                 output_dir=args.test_output,
                 workers=args.workers,
-                random_seed=args.seed,
+                seed=args.seed,
             )
         else:
             logger.info("跳过处理步骤")
 
         if args.test_output.exists():
-            results["validation_results"] = validate_trial_results(args.test_output)
+            results["validation_results"] = _validate_results(args.test_output)
 
             if args.analyze_sampling:
-                results["sampling_analysis"] = analyze_sampling_accuracy(
+                results["sampling_analysis"] = _analyze_sampling(
                     input_dir=args.test_input,
                     output_dir=args.test_output,
                 )
