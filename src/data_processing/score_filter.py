@@ -2,14 +2,11 @@
 
 import hashlib
 import logging
-from typing import TYPE_CHECKING
 
 from datatrove.pipeline.base import PipelineStep
+from pybloom_live import ScalableBloomFilter
 
-if TYPE_CHECKING:
-    from pybloom_live import ScalableBloomFilter
-
-    from .bucket_config import BucketConfig
+from .bucket_config import BucketConfig
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +16,7 @@ class ScoreFilter(PipelineStep):
 
     def __init__(
         self,
-        bucket: "BucketConfig",
+        bucket: BucketConfig,
         random_seed: int = 42,
         use_bloom_filter: bool = True,
         bloom_capacity: int = 2_000_000_000,
@@ -31,46 +28,35 @@ class ScoreFilter(PipelineStep):
         self.use_bloom_filter = use_bloom_filter
         self.bloom_capacity = bloom_capacity
         self.bloom_error_rate = bloom_error_rate
-        self._bloom_filter: "ScalableBloomFilter | None" = None
+        self._bloom: ScalableBloomFilter | None = None
 
-    def _init_bloom_filter(self) -> None:
+    def _init_bloom(self) -> ScalableBloomFilter:
         """延迟初始化 Bloom Filter。"""
-        if self._bloom_filter is not None:
-            return
-
-        try:
-            from pybloom_live import ScalableBloomFilter
-
-            self._bloom_filter = ScalableBloomFilter(
+        if self._bloom is None:
+            self._bloom = ScalableBloomFilter(
                 initial_capacity=self.bloom_capacity,
                 error_rate=self.bloom_error_rate,
             )
-        except ImportError as e:
-            raise ImportError(
-                "pybloom-live is required. Install: pip install pybloom-live"
-            ) from e
+        return self._bloom
 
     def _is_duplicate(self, doc_id: str) -> bool:
-        """检查文档是否重复（进程内）。"""
+        """检查文档是否重复。"""
         if not self.use_bloom_filter:
             return False
-
-        self._init_bloom_filter()
-
-        if doc_id in self._bloom_filter:  # type: ignore[operator]
-            return True
-        self._bloom_filter.add(doc_id)  # type: ignore[union-attr]
-        return False
+        bloom = self._init_bloom()
+        is_dup = doc_id in bloom
+        if not is_dup:
+            bloom.add(doc_id)
+        return is_dup
 
     def _should_sample(self, doc_id: str, rate: float) -> bool:
         """确定性采样：使用 MD5 哈希生成伪随机数。"""
         if rate >= 1.0:
             return True
-
-        hash_input = f"{self.random_seed}_{doc_id}"
-        hash_bytes = hashlib.md5(hash_input.encode(), usedforsecurity=False).digest()
+        hash_bytes = hashlib.md5(
+            f"{self.random_seed}_{doc_id}".encode(), usedforsecurity=False
+        ).digest()
         random_val = int.from_bytes(hash_bytes[:8], byteorder="big") / (2**64)
-
         return random_val < rate
 
     def run(self, data, rank: int = 0, world_size: int = 1):

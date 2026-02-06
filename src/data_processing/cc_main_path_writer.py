@@ -21,9 +21,7 @@ class CCMainPathWriter(ParquetWriter):
             max_file_size=max_file_size,
         )
 
-    def _get_output_filename(
-        self, document: Document, rank: int | str = 0, **kwargs
-    ) -> str:
+    def _get_output_filename(self, document: Document, rank: int | str = 0, **_) -> str:
         cc_main = document.metadata.get("cc_main", "unknown")
         rank_str = str(int(rank) if isinstance(rank, int) else rank).zfill(5)
         return f"{cc_main}/{rank_str}.parquet"
