@@ -8,14 +8,7 @@ EPSILON: Final[float] = 1e-9
 
 @dataclass(frozen=True)
 class BucketConfig:
-    """评分桶配置。
-
-    Attributes:
-        name: 桶名称（如 "2.8"）
-        min_score: 评分下限（包含）
-        max_score: 评分上限（不包含），None 表示无上限
-        sampling_rate: 采样率（0-1）
-    """
+    """评分桶配置。"""
 
     name: str
     min_score: float
@@ -23,13 +16,12 @@ class BucketConfig:
     sampling_rate: float
 
     def contains(self, score: float) -> bool:
-        """检查评分是否在区间内（左闭右开，考虑浮点数精度）。"""
+        """检查评分是否在区间内（左闭右开）。"""
         if self.max_score is None:
             return score >= self.min_score - EPSILON
         return (score >= self.min_score - EPSILON) and (score < self.max_score)
 
     def __repr__(self) -> str:
-        """返回桶配置的字符串表示。"""
         interval = (
             f"[{self.min_score}, +∞)"
             if self.max_score is None
