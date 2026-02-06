@@ -16,16 +16,16 @@ from .cc_main_path_writer import CCMainPathWriter
 from .score_filter import ScoreFilter
 
 DEFAULT_WORKERS = 8
-DEFAULT_RANDOM_SEED = 42
+DEFAULT_SEED = 42
 DEFAULT_COMPRESSION: Literal["snappy", "gzip", "brotli", "lz4", "zstd"] = "zstd"
-DEFAULT_MAX_FILE_SIZE = 512 * 1024 * 1024
+DEFAULT_MAX_SIZE = 512 * 1024 * 1024
 BLOOM_CAPACITY = 2_000_000_000
 BLOOM_ERROR_RATE = 0.001
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 
-def setup_logging(log_dir: Path, bucket_name: str) -> logging.Logger:
-    """设置日志记录并返回 logger。"""
+def _setup_logging(log_dir: Path, bucket_name: str) -> logging.Logger:
+    """设置日志记录。"""
     log_dir = log_dir / bucket_name
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -34,11 +34,9 @@ def setup_logging(log_dir: Path, bucket_name: str) -> logging.Logger:
 
     if not logger.handlers:
         formatter = logging.Formatter(LOG_FORMAT)
-
         file_handler = logging.FileHandler(log_dir / "processing.log")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
@@ -46,16 +44,16 @@ def setup_logging(log_dir: Path, bucket_name: str) -> logging.Logger:
     return logger
 
 
-def create_bucket_pipeline(
+def _create_pipeline(
     input_path: Path,
     output_path: Path,
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
-    random_seed: int = DEFAULT_RANDOM_SEED,
+    seed: int = DEFAULT_SEED,
     compression: Literal[
         "snappy", "gzip", "brotli", "lz4", "zstd"
     ] = DEFAULT_COMPRESSION,
-    max_file_size: int = DEFAULT_MAX_FILE_SIZE,
+    max_size: int = DEFAULT_MAX_SIZE,
 ) -> LocalPipelineExecutor:
     """创建单个评分桶的 Pipeline。"""
     pipeline = [
@@ -66,7 +64,7 @@ def create_bucket_pipeline(
         ),
         ScoreFilter(
             bucket=bucket,
-            random_seed=random_seed,
+            random_seed=seed,
             use_bloom_filter=True,
             bloom_capacity=BLOOM_CAPACITY,
             bloom_error_rate=BLOOM_ERROR_RATE,
@@ -74,7 +72,7 @@ def create_bucket_pipeline(
         CCMainPathWriter(
             output_folder=str(output_path),
             compression=compression,
-            max_file_size=max_file_size,
+            max_file_size=max_size,
         ),
     ]
 
@@ -85,32 +83,32 @@ def create_bucket_pipeline(
     )
 
 
-def process_single_bucket(
+def _process_single_bucket(
     input_path: Path,
     output_base: Path,
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
-    random_seed: int = DEFAULT_RANDOM_SEED,
+    seed: int = DEFAULT_SEED,
     compression: Literal[
         "snappy", "gzip", "brotli", "lz4", "zstd"
     ] = DEFAULT_COMPRESSION,
-    max_file_size: int = DEFAULT_MAX_FILE_SIZE,
+    max_size: int = DEFAULT_MAX_SIZE,
 ) -> str:
     """处理单个评分桶。"""
     output_path = output_base / bucket.name
     output_path.mkdir(parents=True, exist_ok=True)
 
-    logger = setup_logging(output_base.parent / "logs", bucket.name)
+    logger = _setup_logging(output_base.parent / "logs", bucket.name)
     logger.info(f"开始处理桶 {bucket.name}: {bucket}")
 
-    executor = create_bucket_pipeline(
+    executor = _create_pipeline(
         input_path=input_path,
         output_path=output_path,
         bucket=bucket,
         workers=workers,
-        random_seed=random_seed,
+        seed=seed,
         compression=compression,
-        max_file_size=max_file_size,
+        max_size=max_size,
     )
 
     executor.run()
@@ -122,12 +120,12 @@ def process_all_buckets(
     input_path: Path,
     output_base: Path,
     workers_per_bucket: int = DEFAULT_WORKERS,
-    random_seed: int = DEFAULT_RANDOM_SEED,
+    random_seed: int = DEFAULT_SEED,
     parallel_buckets: int = 1,
     compression: Literal[
         "snappy", "gzip", "brotli", "lz4", "zstd"
     ] = DEFAULT_COMPRESSION,
-    max_file_size: int = DEFAULT_MAX_FILE_SIZE,
+    max_file_size: int = DEFAULT_MAX_SIZE,
     buckets: list[BucketConfig] | None = None,
 ) -> list[str]:
     """处理所有评分桶。"""
@@ -135,14 +133,14 @@ def process_all_buckets(
 
     if parallel_buckets == 1:
         return [
-            process_single_bucket(
+            _process_single_bucket(
                 input_path=input_path,
                 output_base=output_base,
                 bucket=bucket,
                 workers=workers_per_bucket,
-                random_seed=random_seed,
+                seed=random_seed,
                 compression=compression,
-                max_file_size=max_file_size,
+                max_size=max_file_size,
             )
             for bucket in buckets
         ]
@@ -150,7 +148,7 @@ def process_all_buckets(
     with ProcessPoolExecutor(max_workers=parallel_buckets) as executor:
         futures = [
             executor.submit(
-                process_single_bucket,
+                _process_single_bucket,
                 input_path,
                 output_base,
                 bucket,
@@ -171,16 +169,9 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 处理所有评分桶（顺序）
   python -m src.data_processing.fineweb_reorganizer
-
-  # 处理指定评分桶
   python -m src.data_processing.fineweb_reorganizer --bucket 3.0
-
-  # 指定 workers 和随机种子
   python -m src.data_processing.fineweb_reorganizer --workers 16 --seed 42
-
-  # 并行处理多个桶
   python -m src.data_processing.fineweb_reorganizer --parallel-buckets 4
         """,
     )
@@ -212,8 +203,8 @@ def main() -> int:
     parser.add_argument(
         "--seed",
         type=int,
-        default=DEFAULT_RANDOM_SEED,
-        help=f"随机种子（默认：{DEFAULT_RANDOM_SEED}）",
+        default=DEFAULT_SEED,
+        help=f"随机种子（默认：{DEFAULT_SEED}）",
     )
     parser.add_argument(
         "--parallel-buckets",
@@ -231,8 +222,8 @@ def main() -> int:
     parser.add_argument(
         "--max-file-size",
         type=int,
-        default=DEFAULT_MAX_FILE_SIZE,
-        help=f"单个输出文件最大大小（字节，默认：{DEFAULT_MAX_FILE_SIZE // (1024 * 1024)}MB）",
+        default=DEFAULT_MAX_SIZE,
+        help=f"单个输出文件最大大小（字节，默认：{DEFAULT_MAX_SIZE // (1024 * 1024)}MB）",
     )
 
     args = parser.parse_args()
