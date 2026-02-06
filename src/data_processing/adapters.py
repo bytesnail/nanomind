@@ -1,4 +1,4 @@
-"""FineWeb-Edu 数据适配器。"""
+"""FineWeb-Edu 数据适配器模块。"""
 
 from typing import Any
 

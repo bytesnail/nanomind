@@ -1,4 +1,4 @@
-"""评分过滤器。"""
+"""评分过滤器模块。"""
 
 import hashlib
 import logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ScoreFilter(PipelineStep):
-    """根据评分区间过滤文档并进行确定性采样和去重。"""
+    """根据评分区间过滤文档，并进行确定性采样和去重。"""
 
     def __init__(
         self,

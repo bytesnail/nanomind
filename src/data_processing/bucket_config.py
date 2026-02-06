@@ -1,4 +1,4 @@
-"""评分桶配置。"""
+"""评分桶配置模块。"""
 
 from dataclasses import dataclass
 from typing import Final
@@ -16,10 +16,10 @@ class BucketConfig:
     sampling_rate: float
 
     def contains(self, score: float) -> bool:
-        """检查评分是否在区间内（左闭右开）。"""
+        """检查评分是否在区间内（左闭右开，含精度容错）。"""
         if self.max_score is None:
             return score >= self.min_score - EPSILON
-        return (score >= self.min_score - EPSILON) and (score < self.max_score)
+        return self.min_score - EPSILON <= score < self.max_score
 
     def __repr__(self) -> str:
         interval = (
