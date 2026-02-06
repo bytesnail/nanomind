@@ -1,4 +1,4 @@
-"""CC-MAIN 路径写入器模块。"""
+"""CC-MAIN 路径写入器。"""
 
 from typing import Literal
 
@@ -7,8 +7,6 @@ from datatrove.pipeline.writers import ParquetWriter
 
 
 class CCMainPathWriter(ParquetWriter):
-    """根据 cc_main 元数据将文档写入对应的 CC-MAIN 批次子目录。"""
-
     def __init__(
         self,
         output_folder: str,

@@ -1,19 +1,14 @@
-"""评分过滤器模块。"""
+"""评分过滤器。"""
 
 import hashlib
-import logging
 
 from datatrove.pipeline.base import PipelineStep
 from pybloom_live import ScalableBloomFilter
 
 from .bucket_config import BucketConfig
 
-logger = logging.getLogger(__name__)
-
 
 class ScoreFilter(PipelineStep):
-    """根据评分区间过滤文档，并进行确定性采样和去重。"""
-
     def __init__(
         self,
         bucket: BucketConfig,
@@ -31,7 +26,6 @@ class ScoreFilter(PipelineStep):
         self._bloom: ScalableBloomFilter | None = None
 
     def _init_bloom(self) -> ScalableBloomFilter:
-        """延迟初始化 Bloom Filter。"""
         if self._bloom is None:
             self._bloom = ScalableBloomFilter(
                 initial_capacity=self.bloom_capacity,
@@ -40,17 +34,15 @@ class ScoreFilter(PipelineStep):
         return self._bloom
 
     def _is_duplicate(self, doc_id: str) -> bool:
-        """检查文档是否重复。"""
         if not self.use_bloom_filter:
             return False
         bloom = self._init_bloom()
-        is_dup = doc_id in bloom
-        if not is_dup:
-            bloom.add(doc_id)
-        return is_dup
+        if doc_id in bloom:
+            return True
+        bloom.add(doc_id)
+        return False
 
     def _should_sample(self, doc_id: str, rate: float) -> bool:
-        """确定性采样：使用 MD5 哈希生成伪随机数。"""
         if rate >= 1.0:
             return True
         hash_bytes = hashlib.md5(
@@ -60,7 +52,6 @@ class ScoreFilter(PipelineStep):
         return random_val < rate
 
     def run(self, data, rank: int = 0, world_size: int = 1):
-        """处理文档流，过滤符合评分区间的文档。"""
         for doc in data:
             score = doc.metadata.get("score")
 
