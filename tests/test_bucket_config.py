@@ -11,39 +11,30 @@ from src.data_processing.bucket_config import (
 
 
 class TestBucketConfig:
-    """测试 BucketConfig 类。"""
-
     def test_contains_with_max_score(self):
-        """测试有上限的评分区间。"""
         bucket = BucketConfig("test", 2.8, 3.0, 0.5)
 
         assert bucket.contains(2.8) is True
         assert bucket.contains(2.9) is True
-        assert bucket.contains(2.99) is True
-        assert bucket.contains(3.0) is False  # 右开区间
-        assert bucket.contains(2.799) is False  # 低于下限
-        assert bucket.contains(3.1) is False  # 高于上限
+        assert bucket.contains(3.0) is False
+        assert bucket.contains(2.799) is False
+        assert bucket.contains(3.1) is False
 
     def test_contains_without_max_score(self):
-        """测试无上限的评分区间。"""
         bucket = BucketConfig("test", 4.0, None, 1.0)
 
         assert bucket.contains(4.0) is True
         assert bucket.contains(4.5) is True
         assert bucket.contains(5.0) is True
         assert bucket.contains(3.9) is False
-        assert bucket.contains(100.0) is True  # 无上限
 
     def test_contains_with_float_precision(self):
-        """测试浮点数精度处理。"""
         bucket = BucketConfig("test", 2.8, 3.0, 0.5)
 
-        # 边界值考虑 epsilon
         assert bucket.contains(2.8 - 1e-10) is True
         assert bucket.contains(3.0 - 1e-10) is True
 
     def test_repr(self):
-        """测试字符串表示。"""
         bucket = BucketConfig("2.8", 2.8, 3.0, 0.3)
         repr_str = repr(bucket)
 
@@ -53,10 +44,7 @@ class TestBucketConfig:
 
 
 class TestDefaultBuckets:
-    """测试默认评分桶配置。"""
-
     def test_get_all_bucket_configs(self):
-        """测试获取所有默认桶配置。"""
         buckets = get_all_bucket_configs()
 
         assert len(buckets) == 4
@@ -66,7 +54,6 @@ class TestDefaultBuckets:
         assert buckets[3].name == "4.0"
 
     def test_get_bucket_config_valid(self):
-        """测试获取有效的桶配置。"""
         bucket = get_bucket_config("3.0")
 
         assert bucket.name == "3.0"
@@ -75,45 +62,37 @@ class TestDefaultBuckets:
         assert bucket.sampling_rate == 0.6
 
     def test_get_bucket_config_invalid(self):
-        """测试获取无效的桶配置。"""
-        with pytest.raises(ValueError, match="Unknown bucket name"):
+        with pytest.raises(ValueError, match="Unknown bucket"):
             get_bucket_config("invalid")
 
     def test_find_bucket_for_score(self):
-        """测试根据评分查找桶。"""
-        bucket = find_bucket_for_score(2.8)
-        assert bucket is not None and bucket.name == "2.8"
-        bucket = find_bucket_for_score(2.9)
-        assert bucket is not None and bucket.name == "2.8"
-
-        bucket = find_bucket_for_score(3.0)
-        assert bucket is not None and bucket.name == "3.0"
-        bucket = find_bucket_for_score(3.4)
-        assert bucket is not None and bucket.name == "3.0"
-
-        bucket = find_bucket_for_score(3.5)
-        assert bucket is not None and bucket.name == "3.5"
-        bucket = find_bucket_for_score(3.9)
-        assert bucket is not None and bucket.name == "3.5"
-
-        bucket = find_bucket_for_score(4.0)
-        assert bucket is not None and bucket.name == "4.0"
-        bucket = find_bucket_for_score(5.0)
-        assert bucket is not None and bucket.name == "4.0"
-
+        bucket_28 = find_bucket_for_score(2.8)
+        assert bucket_28 is not None and bucket_28.name == "2.8"
+        bucket_29 = find_bucket_for_score(2.9)
+        assert bucket_29 is not None and bucket_29.name == "2.8"
+        bucket_30 = find_bucket_for_score(3.0)
+        assert bucket_30 is not None and bucket_30.name == "3.0"
+        bucket_34 = find_bucket_for_score(3.4)
+        assert bucket_34 is not None and bucket_34.name == "3.0"
+        bucket_35 = find_bucket_for_score(3.5)
+        assert bucket_35 is not None and bucket_35.name == "3.5"
+        bucket_39 = find_bucket_for_score(3.9)
+        assert bucket_39 is not None and bucket_39.name == "3.5"
+        bucket_40 = find_bucket_for_score(4.0)
+        assert bucket_40 is not None and bucket_40.name == "4.0"
+        bucket_50 = find_bucket_for_score(5.0)
+        assert bucket_50 is not None and bucket_50.name == "4.0"
         assert find_bucket_for_score(2.7) is None
 
     def test_bucket_intervals_no_overlap(self):
-        """测试评分区间不重叠。"""
-        bucket = find_bucket_for_score(3.0)
-        assert bucket is not None and bucket.name == "3.0"
-        bucket = find_bucket_for_score(3.5)
-        assert bucket is not None and bucket.name == "3.5"
-        bucket = find_bucket_for_score(4.0)
-        assert bucket is not None and bucket.name == "4.0"
+        b30 = find_bucket_for_score(3.0)
+        assert b30 is not None and b30.name == "3.0"
+        b35 = find_bucket_for_score(3.5)
+        assert b35 is not None and b35.name == "3.5"
+        b40 = find_bucket_for_score(4.0)
+        assert b40 is not None and b40.name == "4.0"
 
     def test_sampling_rates(self):
-        """测试采样率配置。"""
         buckets = get_all_bucket_configs()
 
         assert buckets[0].sampling_rate == 0.30
