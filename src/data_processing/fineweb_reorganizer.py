@@ -10,7 +10,7 @@ from typing import Literal
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.readers import ParquetReader
 
-from .adapters import fineweb_adapter_safe
+from .adapters import fineweb_adapter
 from .bucket_config import BucketConfig, get_all_bucket_configs, get_bucket_config
 from .cc_main_path_writer import CCMainPathWriter
 from .score_filter import ScoreFilter
@@ -57,7 +57,7 @@ def _create_pipeline(
     pipeline = [
         ParquetReader(
             str(input_path),
-            adapter=fineweb_adapter_safe,
+            adapter=fineweb_adapter,
             glob_pattern="**/*.parquet",
         ),
         ScoreFilter(
