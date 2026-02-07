@@ -3,7 +3,10 @@
 from pathlib import Path
 from typing import Any
 
-DATASET_ROOT_MARKER = "fineweb-edu"
+from .config_loader import get_config
+
+_DATASET_CFG = get_config().dataset.get("fineweb_edu", {})
+DATASET_ROOT_MARKER = _DATASET_CFG.get("root_marker", "fineweb-edu")
 
 
 def _generate_unique_id(source_path: str, idx: int) -> str:
