@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Final
 
-EPSILON: Final = 1e-9
+EPSILON: Final = 1e-6
 
 
 @dataclass(frozen=True)
@@ -14,9 +14,10 @@ class BucketConfig:
     sampling_rate: float
 
     def contains(self, score: float) -> bool:
+        min_with_epsilon = self.min_score - EPSILON
         if self.max_score is None:
-            return score >= self.min_score - EPSILON
-        return self.min_score - EPSILON <= score < self.max_score
+            return score >= min_with_epsilon
+        return min_with_epsilon <= score < self.max_score
 
     def __repr__(self) -> str:
         interval = (
