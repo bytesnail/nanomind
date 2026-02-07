@@ -2,134 +2,120 @@
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
 from src.data_processing.bucket_config import get_all_bucket_configs, get_bucket_config
 
+logger = logging.getLogger(__name__)
 REQUIRED_FIELDS = {"id", "text", "score"}
 
 
-def _validate_schema(file_path: Path) -> tuple[bool, list[str]]:
+def _validate_schema(path: Path) -> tuple[bool, list[str]]:
     try:
-        columns = set(pq.read_table(file_path).column_names)
-        if not REQUIRED_FIELDS.issubset(columns):
-            return False, [f"缺少必需字段: {REQUIRED_FIELDS - columns}"]
+        cols = set(pq.read_table(path).column_names)
+        if not REQUIRED_FIELDS.issubset(cols):
+            return False, [f"缺少必需字段: {REQUIRED_FIELDS - cols}"]
         return True, []
     except Exception as e:
         return False, [f"读取失败: {e}"]
 
 
-def _validate_integrity(file_path: Path) -> tuple[bool, list[str]]:
-    if file_path.stat().st_size == 0:
+def _validate_integrity(path: Path) -> tuple[bool, list[str]]:
+    if path.stat().st_size == 0:
         return False, ["文件大小为 0"]
     try:
-        table = pq.read_table(file_path)
-        return (True, []) if table.num_rows > 0 else (False, ["文件不包含任何记录"])
+        t = pq.read_table(path)
+        return (True, []) if t.num_rows > 0 else (False, ["文件不包含任何记录"])
     except Exception as e:
         return False, [f"文件损坏: {e}"]
 
 
-def _validate_score_range(file_path: Path, bucket_name: str) -> tuple[bool, list[str]]:
+def _validate_score_range(path: Path, name: str) -> tuple[bool, list[str]]:
     try:
-        bucket = get_bucket_config(bucket_name)
-    except ValueError:
-        return False, [f"未知桶: {bucket_name}"]
-
-    try:
-        table = pq.read_table(file_path)
-        if "score" not in table.column_names:
+        bucket = get_bucket_config(name)
+        t = pq.read_table(path)
+        if "score" not in t.column_names:
             return False, ["缺少 score 字段"]
-
-        scores = table.column("score").to_pylist()
-        out_of_range = sum(1 for score in scores if not bucket.contains(score))
-
-        if out_of_range > 0:
-            max_str = "+∞" if bucket.max_score is None else str(bucket.max_score)
-            return False, [
-                f"{out_of_range} 条记录不在范围 [{bucket.min_score}, {max_str})"
-            ]
+        scores = t.column("score").to_pylist()
+        bad = sum(1 for s in scores if not bucket.contains(s))
+        if bad > 0:
+            mx = "+∞" if bucket.max_score is None else str(bucket.max_score)
+            return False, [f"{bad} 条记录不在范围 [{bucket.min_score}, {mx})"]
         return True, []
+    except ValueError as e:
+        return False, [str(e)]
     except Exception as e:
         return False, [f"验证失败: {e}"]
 
 
-def _collect_stats(bucket_path: Path) -> dict:
-    stats = {
+def _collect_stats(path: Path) -> dict[str, Any]:
+    cc_batches: set[str] = set()
+    stats: dict[str, Any] = {
         "file_count": 0,
         "record_count": 0,
         "total_size_bytes": 0,
-        "cc_main_batches": set(),
     }
-
-    for parquet_file in bucket_path.rglob("*.parquet"):
+    for f in path.rglob("*.parquet"):
         stats["file_count"] += 1
-        stats["total_size_bytes"] += parquet_file.stat().st_size
-
+        stats["total_size_bytes"] += f.stat().st_size
         try:
-            table = pq.read_table(parquet_file)
-            stats["record_count"] += table.num_rows
-            cc_main = parquet_file.parent.name
-            if cc_main.startswith("CC-MAIN-"):
-                stats["cc_main_batches"].add(cc_main)
-        except Exception:
-            pass
-
-    stats["cc_main_batches"] = sorted(stats["cc_main_batches"])
+            t = pq.read_table(f)
+            stats["record_count"] += t.num_rows
+            cc = f.parent.name
+            if cc.startswith("CC-MAIN-"):
+                cc_batches.add(cc)
+        except (OSError, ValueError) as e:
+            logger.debug(f"读取文件 {f} 失败: {e}")
+    stats["cc_main_batches"] = sorted(cc_batches)
     stats["total_size_gb"] = stats["total_size_bytes"] / (1024**3)
-
     return stats
 
 
-def _validate_bucket(bucket_path: Path, bucket_name: str) -> dict:
+def _validate_bucket(path: Path, name: str) -> dict:
     result = {
-        "bucket_name": bucket_name,
+        "bucket_name": name,
         "valid": True,
         "file_count": 0,
         "error_count": 0,
         "errors": [],
         "stats": {},
     }
-
-    if not bucket_path.exists():
+    if not path.exists():
         result["valid"] = False
-        result["errors"].append(f"桶目录不存在: {bucket_path}")
+        result["errors"].append(f"桶目录不存在: {path}")
         return result
 
-    parquet_files = list(bucket_path.rglob("*.parquet"))
-    result["file_count"] = len(parquet_files)
-
-    if not parquet_files:
+    files = list(path.rglob("*.parquet"))
+    result["file_count"] = len(files)
+    if not files:
         result["valid"] = False
         result["errors"].append("桶中没有 parquet 文件")
         return result
 
-    validators = [
-        (_validate_integrity, "完整性"),
-        (_validate_schema, "Schema"),
-        (lambda p: _validate_score_range(p, bucket_name), "评分范围"),
-    ]
-
-    for file_path in tqdm(parquet_files, desc=f"验证桶 {bucket_name}"):
-        for validator, prefix in validators:
-            valid, errors = validator(file_path)
-            if not valid:
+    for f in tqdm(files, desc=f"验证桶 {name}"):
+        for validator, prefix in [
+            (_validate_integrity, "完整性"),
+            (_validate_schema, "Schema"),
+            (lambda p: _validate_score_range(p, name), "评分范围"),
+        ]:
+            ok, errs = validator(f)
+            if not ok:
                 result["valid"] = False
                 result["error_count"] += 1
-                result["errors"].extend(
-                    [f"{file_path} ({prefix}): {e}" for e in errors]
-                )
+                result["errors"].extend([f"{f} ({prefix}): {e}" for e in errs])
                 break
 
-    result["stats"] = _collect_stats(bucket_path)
+    result["stats"] = _collect_stats(path)
     return result
 
 
-def _validate_all(base_path: Path) -> dict:
-    buckets = get_all_bucket_configs()
+def _validate_all(base: Path) -> dict:
     results = {
         "valid": True,
         "buckets": {},
@@ -140,48 +126,39 @@ def _validate_all(base_path: Path) -> dict:
             "total_errors": 0,
         },
     }
-
-    for bucket in buckets:
-        bucket_path = base_path / bucket.name
-        bucket_result = _validate_bucket(bucket_path, bucket.name)
-        results["buckets"][bucket.name] = bucket_result
-
-        if not bucket_result["valid"]:
+    for b in get_all_bucket_configs():
+        r = _validate_bucket(base / b.name, b.name)
+        results["buckets"][b.name] = r
+        if not r["valid"]:
             results["valid"] = False
-
-        results["summary"]["total_files"] += bucket_result["file_count"]
-        results["summary"]["total_errors"] += bucket_result["error_count"]
-        results["summary"]["total_records"] += bucket_result["stats"].get(
-            "record_count", 0
-        )
-        results["summary"]["total_size_gb"] += bucket_result["stats"].get(
-            "total_size_gb", 0
-        )
-
+        results["summary"]["total_files"] += r["file_count"]
+        results["summary"]["total_errors"] += r["error_count"]
+        results["summary"]["total_records"] += r["stats"].get("record_count", 0)
+        results["summary"]["total_size_gb"] += r["stats"].get("total_size_gb", 0)
     return results
 
 
-def _print_report(results: dict, verbose: bool = False) -> None:
+def _print_report(
+    results: dict, verbose: bool = False, title: str = "FineWeb-Edu 重组验证报告"
+) -> None:
     print("\n" + "=" * 60)
-    print("FineWeb-Edu 重组验证报告")
+    print(title)
     print("=" * 60)
 
-    for bucket_name, bucket_result in results["buckets"].items():
-        print(f"\n桶 {bucket_name}:")
-        print(f"  状态: {'✅ 通过' if bucket_result['valid'] else '❌ 失败'}")
-        print(f"  文件数: {bucket_result['file_count']}")
-
-        stats = bucket_result.get("stats", {})
-        print(f"  记录数: {stats.get('record_count', 0):,}")
-        print(f"  总大小: {stats.get('total_size_gb', 0):.2f} GB")
-        print(f"  CC-MAIN 批次数: {len(stats.get('cc_main_batches', []))}")
-
-        if verbose and bucket_result["errors"]:
+    for name, r in results["buckets"].items():
+        print(f"\n桶 {name}:")
+        print(f"  状态: {'✅ 通过' if r['valid'] else '❌ 失败'}")
+        print(f"  文件数: {r['file_count']}")
+        s = r.get("stats", {})
+        print(f"  记录数: {s.get('record_count', 0):,}")
+        print(f"  总大小: {s.get('total_size_gb', 0):.2f} GB")
+        print(f"  CC-MAIN 批次数: {len(s.get('cc_main_batches', []))}")
+        if verbose and r["errors"]:
             print("  错误详情:")
-            for error in bucket_result["errors"][:10]:
-                print(f"    - {error}")
-            if len(bucket_result["errors"]) > 10:
-                print(f"    ... 还有 {len(bucket_result['errors']) - 10} 个错误")
+            for e in r["errors"][:10]:
+                print(f"    - {e}")
+            if len(r["errors"]) > 10:
+                print(f"    ... 还有 {len(r['errors']) - 10} 个错误")
 
     print("\n" + "-" * 60)
     print("总计:")
@@ -197,12 +174,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="验证 FineWeb-Edu 重组结果",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
+        epilog="""示例:
   python scripts/validate_output.py --input data/datasets/fineweb/en
   python scripts/validate_output.py --input data/datasets/fineweb/en --bucket 3.0
-  python scripts/validate_output.py --input data/datasets/fineweb/en --verbose
-        """,
+  python scripts/validate_output.py --input data/datasets/fineweb/en --verbose""",
     )
 
     parser.add_argument("--input", type=Path, required=True, help="输入目录")
@@ -218,31 +193,29 @@ def main() -> int:
         print(f"错误：输入目录不存在：{args.input}", file=sys.stderr)
         return 1
 
-    if args.bucket:
-        bucket_path = args.input / args.bucket
-        bucket_result = _validate_bucket(bucket_path, args.bucket)
-        results = {
-            "valid": bucket_result["valid"],
-            "buckets": {args.bucket: bucket_result},
+    results = (
+        _validate_all(args.input)
+        if not args.bucket
+        else {
+            "valid": (r := _validate_bucket(args.input / args.bucket, args.bucket))[
+                "valid"
+            ],
+            "buckets": {args.bucket: r},
             "summary": {
-                "total_files": bucket_result["file_count"],
-                "total_records": bucket_result["stats"].get("record_count", 0),
-                "total_size_gb": bucket_result["stats"].get("total_size_gb", 0),
-                "total_errors": bucket_result["error_count"],
+                "total_files": r["file_count"],
+                "total_records": r["stats"].get("record_count", 0),
+                "total_size_gb": r["stats"].get("total_size_gb", 0),
+                "total_errors": r["error_count"],
             },
         }
-    else:
-        results = _validate_all(args.input)
+    )
 
     _print_report(results, verbose=args.verbose)
 
     if args.json:
-        for bucket_result in results["buckets"].values():
-            if "cc_main_batches" in bucket_result.get("stats", {}):
-                bucket_result["stats"]["cc_main_batches"] = list(
-                    bucket_result["stats"]["cc_main_batches"]
-                )
-
+        for r in results["buckets"].values():
+            if "cc_main_batches" in r.get("stats", {}):
+                r["stats"]["cc_main_batches"] = list(r["stats"]["cc_main_batches"])
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
         print(f"\n结果已保存到: {args.json}")
