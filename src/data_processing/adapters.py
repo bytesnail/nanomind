@@ -7,7 +7,6 @@ DATASET_ROOT_MARKER = "fineweb-edu"
 
 
 def _generate_unique_id(source_path: str, idx: int) -> str:
-    """从 source_path 提取相对路径并与 idx 组合为唯一 ID。"""
     if not source_path:
         raise ValueError("source_path cannot be empty")
     if idx < 0:
@@ -26,7 +25,6 @@ def _generate_unique_id(source_path: str, idx: int) -> str:
 def fineweb_adapter(
     _reader: Any, raw: dict, source: str, idx: int, *, raise_on_error: bool = False
 ) -> dict[str, Any] | None:
-    """FineWeb-Edu 数据适配器。text 缺失/为空时：raise_on_error 控制抛错或返回 None。"""
     if not (text := raw.get("text", "")):
         if raise_on_error:
             raise ValueError("text is missing or empty")
