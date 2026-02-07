@@ -28,6 +28,7 @@ _processing_cfg = _cfg.processing
 _paths_cfg = _cfg.paths
 
 DEFAULT_WORKERS = _processing_cfg.get("workers", 8)
+DEFAULT_TASKS = _processing_cfg.get("tasks", DEFAULT_WORKERS)
 DEFAULT_SEED = _processing_cfg.get("random_seed", 42)
 DEFAULT_COMPRESSION: Compression = _processing_cfg.get("compression", "zstd")
 DEFAULT_MAX_SIZE = _processing_cfg.get("max_file_size_bytes", 512 * 1024 * 1024)
@@ -58,6 +59,7 @@ def _create_pipeline(
     output: Path,
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
+    tasks: int = DEFAULT_TASKS,
     seed: int = DEFAULT_SEED,
     compression: Compression = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
@@ -73,25 +75,29 @@ def _create_pipeline(
     ]
     return LocalPipelineExecutor(
         pipeline=pipeline,
-        tasks=workers,
+        tasks=tasks,
+        workers=workers,
         logging_dir=str(output.parent / "logs" / bucket.name),
     )
 
 
 def _process_bucket(
     input_dir: Path,
-    out_base: Path,
+    output_dir: Path,
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
+    tasks: int = DEFAULT_TASKS,
     seed: int = DEFAULT_SEED,
     compression: Compression = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
 ) -> str:
-    out = out_base / bucket.name
+    out = output_dir / bucket.name
     out.mkdir(parents=True, exist_ok=True)
-    logger = _setup_logging(out_base.parent / "logs", bucket.name)
+    logger = _setup_logging(output_dir.parent / "logs", bucket.name)
     logger.info(f"开始处理桶 {bucket.name}: {bucket}")
-    _create_pipeline(input_dir, out, bucket, workers, seed, compression, max_size).run()
+    _create_pipeline(
+        input_dir, out, bucket, workers, tasks, seed, compression, max_size
+    ).run()
     logger.info(f"桶 {bucket.name} 处理完成")
     return bucket.name
 
@@ -100,6 +106,7 @@ def process_all_buckets(
     input_dir: Path,
     output_dir: Path,
     workers: int = DEFAULT_WORKERS,
+    tasks: int = DEFAULT_TASKS,
     seed: int = DEFAULT_SEED,
     parallel: int = 1,
     compression: Compression = DEFAULT_COMPRESSION,
@@ -110,9 +117,9 @@ def process_all_buckets(
     if parallel == 1:
         return [
             _process_bucket(
-                input_dir, output_dir, b, workers, seed, compression, max_size
+                input_dir, output_dir, bucket, workers, tasks, seed, compression, max_size
             )
-            for b in buckets
+            for bucket in buckets
         ]
     with ProcessPoolExecutor(max_workers=parallel) as pool:
         futures = [
@@ -120,13 +127,14 @@ def process_all_buckets(
                 _process_bucket,
                 input_dir,
                 output_dir,
-                b,
+                bucket,
                 workers,
+                tasks,
                 seed,
                 compression,
                 max_size,
             )
-            for b in buckets
+            for bucket in buckets
         ]
         return [f.result() for f in futures]
 
@@ -156,6 +164,12 @@ def main() -> int:
         type=int,
         default=DEFAULT_WORKERS,
         help=f"每个桶的 worker 数量（默认：{DEFAULT_WORKERS}）",
+    )
+    parser.add_argument(
+        "--tasks",
+        type=int,
+        default=DEFAULT_TASKS,
+        help=f"Datatrove pipeline 的 tasks 数量（默认：{DEFAULT_TASKS}，未设置时与 workers 相同）",
     )
     parser.add_argument(
         "--seed",
@@ -192,11 +206,12 @@ def main() -> int:
             args.input,
             args.output,
             args.workers,
+            args.tasks,
             args.seed,
             args.parallel_buckets,
             args.compression,
             args.max_file_size,
-            buckets,  # type: ignore[arg-type]
+            buckets
         )
         print(f"处理完成：{', '.join(results)}")
         return 0

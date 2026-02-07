@@ -1,7 +1,10 @@
 # FineWeb-Edu 数据处理参数配置
 
 # 并行处理配置
-workers: 8
+workers: 30
+
+# Datatrove pipeline 任务数
+tasks: 1000
 
 # 随机种子（用于可复现的采样）
 random_seed: 42
