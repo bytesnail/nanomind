@@ -1,5 +1,3 @@
-"""CC-MAIN 路径写入器。"""
-
 from typing import Literal
 
 from datatrove.data import Document
