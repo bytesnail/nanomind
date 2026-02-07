@@ -17,7 +17,7 @@ from .bucket_config import (
     get_bucket_config,
     get_bucket_names,
 )
-from .cc_main_path_writer import CCMainPathWriter
+from .bucket_path_writer import BucketPathWriter
 from .config_loader import get_config
 from .score_filter import ScoreFilter
 
@@ -67,7 +67,7 @@ def _create_pipeline(
             str(input_dir), adapter=fineweb_adapter, glob_pattern="**/*.parquet"
         ),
         ScoreFilter(bucket=bucket, random_seed=seed),
-        CCMainPathWriter(
+        BucketPathWriter(
             output_folder=str(output), compression=compression, max_file_size=max_size
         ),
     ]
@@ -143,13 +143,10 @@ def main() -> int:
     )
 
     parser.add_argument(
-        "--input",
-        type=Path,
-        default=Path("data/datasets/HuggingFaceFW/fineweb-edu"),
-        help="源数据目录",
+        "--input", type=Path, default=DEFAULT_INPUT_DIR, help="源数据目录"
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("data/datasets/fineweb/en"), help="输出目录"
+        "--output", type=Path, default=DEFAULT_OUTPUT_DIR, help="输出目录"
     )
     parser.add_argument(
         "--bucket", type=str, choices=get_bucket_names(), help="只处理指定评分桶"

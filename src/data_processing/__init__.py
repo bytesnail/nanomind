@@ -8,12 +8,12 @@ from .bucket_config import (
     get_bucket_names,
     get_sampling_rates,
 )
-from .cc_main_path_writer import CCMainPathWriter
+from .bucket_path_writer import BucketPathWriter
 from .score_filter import ScoreFilter
 
 __all__ = [
     "BucketConfig",
-    "CCMainPathWriter",
+    "BucketPathWriter",
     "ScoreFilter",
     "fineweb_adapter",
     "get_all_bucket_configs",

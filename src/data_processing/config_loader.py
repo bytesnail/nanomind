@@ -52,13 +52,16 @@ class Config:
     def get_epsilon(self) -> float:
         return float(self.buckets.get("epsilon", 1e-6))
 
+    def _get_fineweb_config(self) -> dict[str, Any]:
+        return self.dataset.get("fineweb_edu", {})
+
     def get_required_fields(self) -> set[str]:
-        fineweb = self.dataset.get("fineweb_edu", {})
-        return set(fineweb.get("required_fields", ["id", "text", "score"]))
+        return set(
+            self._get_fineweb_config().get("required_fields", ["id", "text", "score"])
+        )
 
     def get_root_marker(self) -> str:
-        fineweb = self.dataset.get("fineweb_edu", {})
-        return fineweb.get("root_marker", "fineweb-edu")
+        return self._get_fineweb_config().get("root_marker", "fineweb-edu")
 
 
 _config_instance: Config | None = None

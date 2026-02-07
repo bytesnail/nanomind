@@ -60,7 +60,6 @@ def _validate_score_range(path: Path, name: str) -> tuple[bool, list[str]]:
 
 
 def _collect_stats(path: Path) -> dict[str, Any]:
-    cc_batches: set[str] = set()
     stats: dict[str, Any] = {
         "file_count": 0,
         "record_count": 0,
@@ -72,12 +71,8 @@ def _collect_stats(path: Path) -> dict[str, Any]:
         try:
             t = pq.read_table(f)
             stats["record_count"] += t.num_rows
-            cc = f.parent.name
-            if cc.startswith("CC-MAIN-"):
-                cc_batches.add(cc)
         except (OSError, ValueError) as e:
             logger.debug(f"读取文件 {f} 失败: {e}")
-    stats["cc_main_batches"] = sorted(cc_batches)
     stats["total_size_gb"] = stats["total_size_bytes"] / (1024**3)
     return stats
 
@@ -157,7 +152,6 @@ def _print_report(
         s = r.get("stats", {})
         print(f"  记录数: {s.get('record_count', 0):,}")
         print(f"  总大小: {s.get('total_size_gb', 0):.2f} GB")
-        print(f"  CC-MAIN 批次数: {len(s.get('cc_main_batches', []))}")
         if verbose and r["errors"]:
             print("  错误详情:")
             for e in r["errors"][:10]:
@@ -198,13 +192,10 @@ def main() -> int:
         print(f"错误：输入目录不存在：{args.input}", file=sys.stderr)
         return 1
 
-    results = (
-        _validate_all(args.input)
-        if not args.bucket
-        else {
-            "valid": (r := _validate_bucket(args.input / args.bucket, args.bucket))[
-                "valid"
-            ],
+    if args.bucket:
+        r = _validate_bucket(args.input / args.bucket, args.bucket)
+        results = {
+            "valid": r["valid"],
             "buckets": {args.bucket: r},
             "summary": {
                 "total_files": r["file_count"],
@@ -213,14 +204,12 @@ def main() -> int:
                 "total_errors": r["error_count"],
             },
         }
-    )
+    else:
+        results = _validate_all(args.input)
 
     _print_report(results, verbose=args.verbose)
 
     if args.json:
-        for r in results["buckets"].values():
-            if "cc_main_batches" in r.get("stats", {}):
-                r["stats"]["cc_main_batches"] = list(r["stats"]["cc_main_batches"])
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
         print(f"\n结果已保存到: {args.json}")

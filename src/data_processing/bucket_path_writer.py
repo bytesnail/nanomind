@@ -1,10 +1,17 @@
+"""评分桶路径写入器。"""
+
 from typing import Literal
 
 from datatrove.data import Document
 from datatrove.pipeline.writers import ParquetWriter
 
 
-class CCMainPathWriter(ParquetWriter):
+class BucketPathWriter(ParquetWriter):
+    """评分桶路径写入器：直接将文档写入桶目录。
+
+    输出路径格式: {rank_str}.parquet
+    """
+
     def __init__(
         self,
         output_folder: str,
@@ -18,9 +25,8 @@ class CCMainPathWriter(ParquetWriter):
         )
 
     def _get_output_filename(self, document: Document, rank: int | str = 0, **_) -> str:
-        cc_main = document.metadata.get("cc_main", "unknown")
         rank_str = str(int(rank) if isinstance(rank, int) else rank).zfill(5)
-        return f"{cc_main}/{rank_str}.parquet"
+        return f"{rank_str}.parquet"
 
     def _default_adapter(self, document: Document) -> dict:
         return {

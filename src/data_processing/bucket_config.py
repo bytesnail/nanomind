@@ -51,24 +51,22 @@ def _ensure_loaded():
 
 def get_bucket_config(name: str) -> BucketConfig:
     _ensure_loaded()
-    if _BUCKET_MAP is None:
-        available = "None"
-        raise ValueError(f"Unknown bucket: {name}. Available: {available}")
-    bucket_map = _BUCKET_MAP
-    bucket_config = bucket_map.get(name)
-    if bucket_config is None:
-        available = ", ".join(bucket_map.keys())
-        raise ValueError(f"Unknown bucket: {name}. Available: {available}")
-    return bucket_config
+    if bucket := _BUCKET_MAP.get(name):
+        return bucket
+    available = ", ".join(_BUCKET_MAP.keys()) if _BUCKET_MAP else "None"
+    raise ValueError(f"Unknown bucket: {name}. Available: {available}")
 
 
 def get_all_bucket_configs() -> list[BucketConfig]:
     _ensure_loaded()
-    return list(_DEFAULT_BUCKETS) if _DEFAULT_BUCKETS else []
+    return list(_DEFAULT_BUCKETS)
 
 
 def find_bucket_for_score(score: float) -> BucketConfig | None:
-    return next((b for b in get_all_bucket_configs() if b.contains(score)), None)
+    for b in get_all_bucket_configs():
+        if b.contains(score):
+            return b
+    return None
 
 
 def get_bucket_names() -> list[str]:
