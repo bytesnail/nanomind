@@ -80,7 +80,7 @@ class BucketConfig:
 | 文件 | 内容 |
 |------|------|
 | `buckets.yaml` | 评分桶定义、epsilon |
-| `processing.yaml` | workers、random_seed、compression、max_file_size_bytes |
+| `processing.yaml` | workers、tasks、random_seed、compression、max_file_size_bytes |
 | `paths.yaml` | input_dir、output_dir，支持 `FINEWEB_{KEY}` 环境变量覆盖 |
 | `dataset.yaml` | 数据集字段配置、root_marker |
 
@@ -97,6 +97,9 @@ python -m src.data_processing.fineweb_reorganizer --bucket 3.0
 
 # 指定 workers 和随机种子
 python -m src.data_processing.fineweb_reorganizer --workers 16 --seed 42
+
+# 单独指定 tasks 数量（控制 Datatrove pipeline 并行度）
+python -m src.data_processing.fineweb_reorganizer --workers 8 --tasks 16
 
 # 并行处理多个桶
 python -m src.data_processing.fineweb_reorganizer --parallel-buckets 4

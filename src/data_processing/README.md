@@ -37,6 +37,9 @@ python -m src.data_processing.fineweb_reorganizer --bucket 3.0
 
 # 指定 workers 和随机种子
 python -m src.data_processing.fineweb_reorganizer --workers 16 --seed 42
+
+# 单独指定 tasks 数量（控制 Datatrove pipeline 并行度）
+python -m src.data_processing.fineweb_reorganizer --workers 8 --tasks 16
 ```
 
 ## 配置文件
