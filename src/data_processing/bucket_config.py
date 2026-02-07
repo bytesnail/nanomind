@@ -1,4 +1,4 @@
-"""评分桶配置模块。"""
+"""评分桶配置。"""
 
 from dataclasses import dataclass
 from typing import Final
@@ -14,10 +14,8 @@ class BucketConfig:
     sampling_rate: float
 
     def contains(self, score: float) -> bool:
-        min_with_epsilon = self.min_score - EPSILON
-        if self.max_score is None:
-            return score >= min_with_epsilon
-        return min_with_epsilon <= score < self.max_score
+        min_ok = score >= self.min_score - EPSILON
+        return min_ok if self.max_score is None else min_ok and score < self.max_score
 
     def __repr__(self) -> str:
         interval = (

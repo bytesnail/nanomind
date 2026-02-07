@@ -128,14 +128,14 @@ def _validate_results(output_dir: Path) -> dict:
 def _count_by_bucket(scores: list[float]) -> dict[str, int]:
     counts = {"2.8": 0, "3.0": 0, "3.5": 0, "4.0": 0}
     for score in scores:
-        if 2.8 <= score < 3.0:
-            counts["2.8"] += 1
-        elif 3.0 <= score < 3.5:
-            counts["3.0"] += 1
-        elif 3.5 <= score < 4.0:
-            counts["3.5"] += 1
-        elif score >= 4.0:
+        if score >= 4.0:
             counts["4.0"] += 1
+        elif score >= 3.5:
+            counts["3.5"] += 1
+        elif score >= 3.0:
+            counts["3.0"] += 1
+        elif score >= 2.8:
+            counts["2.8"] += 1
     return counts
 
 

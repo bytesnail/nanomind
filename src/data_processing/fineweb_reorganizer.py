@@ -15,9 +15,11 @@ from .bucket_config import BucketConfig, get_all_bucket_configs, get_bucket_conf
 from .cc_main_path_writer import CCMainPathWriter
 from .score_filter import ScoreFilter
 
+CompressionType = Literal["snappy", "gzip", "brotli", "lz4", "zstd"]
+
 DEFAULT_WORKERS = 8
 DEFAULT_SEED = 42
-DEFAULT_COMPRESSION: Literal["snappy", "gzip", "brotli", "lz4", "zstd"] = "zstd"
+DEFAULT_COMPRESSION: CompressionType = "zstd"
 DEFAULT_MAX_SIZE = 512 * 1024 * 1024
 BLOOM_CAPACITY = 2_000_000_000
 BLOOM_ERROR_RATE = 0.001
@@ -49,16 +51,12 @@ def _create_pipeline(
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
     seed: int = DEFAULT_SEED,
-    compression: Literal[
-        "snappy", "gzip", "brotli", "lz4", "zstd"
-    ] = DEFAULT_COMPRESSION,
+    compression: CompressionType = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
 ) -> LocalPipelineExecutor:
     pipeline = [
         ParquetReader(
-            str(input_path),
-            adapter=fineweb_adapter,
-            glob_pattern="**/*.parquet",
+            str(input_path), adapter=fineweb_adapter, glob_pattern="**/*.parquet"
         ),
         ScoreFilter(
             bucket=bucket,
@@ -87,9 +85,7 @@ def _process_single_bucket(
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
     seed: int = DEFAULT_SEED,
-    compression: Literal[
-        "snappy", "gzip", "brotli", "lz4", "zstd"
-    ] = DEFAULT_COMPRESSION,
+    compression: CompressionType = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
 ) -> str:
     output_path = output_base / bucket.name
@@ -98,7 +94,7 @@ def _process_single_bucket(
     logger = _setup_logging(output_base.parent / "logs", bucket.name)
     logger.info(f"开始处理桶 {bucket.name}: {bucket}")
 
-    executor = _create_pipeline(
+    _create_pipeline(
         input_path=input_path,
         output_path=output_path,
         bucket=bucket,
@@ -106,9 +102,8 @@ def _process_single_bucket(
         seed=seed,
         compression=compression,
         max_size=max_size,
-    )
+    ).run()
 
-    executor.run()
     logger.info(f"桶 {bucket.name} 处理完成")
     return bucket.name
 
@@ -119,9 +114,7 @@ def process_all_buckets(
     workers_per_bucket: int = DEFAULT_WORKERS,
     random_seed: int = DEFAULT_SEED,
     parallel_buckets: int = 1,
-    compression: Literal[
-        "snappy", "gzip", "brotli", "lz4", "zstd"
-    ] = DEFAULT_COMPRESSION,
+    compression: CompressionType = DEFAULT_COMPRESSION,
     max_file_size: int = DEFAULT_MAX_SIZE,
     buckets: list[BucketConfig] | None = None,
 ) -> list[str]:
@@ -130,13 +123,13 @@ def process_all_buckets(
     if parallel_buckets == 1:
         return [
             _process_single_bucket(
-                input_path=input_path,
-                output_base=output_base,
-                bucket=bucket,
-                workers=workers_per_bucket,
-                seed=random_seed,
-                compression=compression,
-                max_size=max_file_size,
+                input_path,
+                output_base,
+                bucket,
+                workers_per_bucket,
+                random_seed,
+                compression,
+                max_file_size,
             )
             for bucket in buckets
         ]
@@ -178,10 +171,7 @@ def main() -> int:
         help="源数据目录",
     )
     parser.add_argument(
-        "--output",
-        type=Path,
-        default=Path("data/datasets/fineweb/en"),
-        help="输出目录",
+        "--output", type=Path, default=Path("data/datasets/fineweb/en"), help="输出目录"
     )
     parser.add_argument(
         "--bucket",
@@ -202,10 +192,7 @@ def main() -> int:
         help=f"随机种子（默认：{DEFAULT_SEED}）",
     )
     parser.add_argument(
-        "--parallel-buckets",
-        type=int,
-        default=1,
-        help="同时运行的桶数量（默认：1）",
+        "--parallel-buckets", type=int, default=1, help="同时运行的桶数量（默认：1）"
     )
     parser.add_argument(
         "--compression",
@@ -229,8 +216,6 @@ def main() -> int:
 
     args.output.mkdir(parents=True, exist_ok=True)
 
-    buckets = [get_bucket_config(args.bucket)] if args.bucket else None
-
     try:
         results = process_all_buckets(
             input_path=args.input,
@@ -240,7 +225,7 @@ def main() -> int:
             parallel_buckets=args.parallel_buckets,
             compression=args.compression,  # type: ignore[arg-type]
             max_file_size=args.max_file_size,
-            buckets=buckets,
+            buckets=[get_bucket_config(args.bucket)] if args.bucket else None,
         )
         print(f"处理完成：{', '.join(results)}")
         return 0

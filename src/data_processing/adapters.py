@@ -16,11 +16,11 @@ def _generate_unique_id(source_path: str, idx: int) -> str:
     path = Path(source_path)
     try:
         marker_idx = path.parts.index(DATASET_ROOT_MARKER)
-        relative_path = "/".join(path.parts[marker_idx + 1 :])
+        rel_path = "/".join(path.parts[marker_idx + 1 :])
     except ValueError:
-        relative_path = path.as_posix()
+        rel_path = path.as_posix()
 
-    return f"{relative_path}#{idx}"
+    return f"{rel_path}#{idx}"
 
 
 def fineweb_adapter(

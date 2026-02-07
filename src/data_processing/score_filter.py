@@ -28,8 +28,7 @@ class ScoreFilter(PipelineStep):
     def _init_bloom(self) -> ScalableBloomFilter:
         if self._bloom is None:
             self._bloom = ScalableBloomFilter(
-                initial_capacity=self.bloom_capacity,
-                error_rate=self.bloom_error_rate,
+                initial_capacity=self.bloom_capacity, error_rate=self.bloom_error_rate
             )
         return self._bloom
 
@@ -45,11 +44,11 @@ class ScoreFilter(PipelineStep):
     def _should_sample(self, doc_id: str, rate: float) -> bool:
         if rate >= 1.0:
             return True
-        hash_bytes = hashlib.md5(
-            f"{self.random_seed}_{doc_id}".encode(), usedforsecurity=False
-        ).digest()
-        random_val = int.from_bytes(hash_bytes[:8], byteorder="big") / (2**64)
-        return random_val < rate
+        hash_input = f"{self.random_seed}_{doc_id}".encode()
+        hash_val = int.from_bytes(
+            hashlib.md5(hash_input, usedforsecurity=False).digest()[:8], "big"
+        )
+        return hash_val / (2**64) < rate
 
     def run(self, data, rank: int = 0, world_size: int = 1):
         for doc in data:
@@ -58,15 +57,12 @@ class ScoreFilter(PipelineStep):
             if score is None:
                 self.stat_update("missing_score", value=1)
                 continue
-
             if not isinstance(score, (int, float)):
                 self.stat_update("invalid_score", value=1)
                 continue
-
             if not self.bucket.contains(float(score)):
                 self.stat_update("filtered_out", value=1)
                 continue
-
             if self._is_duplicate(doc.id):
                 self.stat_update("duplicates_removed", value=1)
                 continue

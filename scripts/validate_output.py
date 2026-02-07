@@ -15,8 +15,7 @@ REQUIRED_FIELDS = {"id", "text", "score"}
 
 def _validate_schema(file_path: Path) -> tuple[bool, list[str]]:
     try:
-        table = pq.read_table(file_path)
-        columns = set(table.column_names)
+        columns = set(pq.read_table(file_path).column_names)
         if not REQUIRED_FIELDS.issubset(columns):
             return False, [f"缺少必需字段: {REQUIRED_FIELDS - columns}"]
         return True, []
@@ -29,9 +28,7 @@ def _validate_integrity(file_path: Path) -> tuple[bool, list[str]]:
         return False, ["文件大小为 0"]
     try:
         table = pq.read_table(file_path)
-        if table.num_rows == 0:
-            return False, ["文件不包含任何记录"]
-        return True, []
+        return (True, []) if table.num_rows > 0 else (False, ["文件不包含任何记录"])
     except Exception as e:
         return False, [f"文件损坏: {e}"]
 
