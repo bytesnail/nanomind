@@ -12,19 +12,32 @@ from datatrove.pipeline.readers import ParquetReader
 
 from .adapters import fineweb_adapter
 from .bucket_config import (
-    BUCKET_NAMES,
     BucketConfig,
     get_all_bucket_configs,
     get_bucket_config,
+    get_bucket_names,
 )
 from .cc_main_path_writer import CCMainPathWriter
+from .config_loader import get_config
 from .score_filter import ScoreFilter
 
 Compression = Literal["snappy", "gzip", "brotli", "lz4", "zstd"]
-DEFAULT_WORKERS, DEFAULT_SEED = 8, 42
-DEFAULT_COMPRESSION: Compression = "zstd"
-DEFAULT_MAX_SIZE = 512 * 1024 * 1024
-LOG_FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+_cfg = get_config()
+_processing_cfg = _cfg.processing
+_paths_cfg = _cfg.paths
+
+DEFAULT_WORKERS = _processing_cfg.get("workers", 8)
+DEFAULT_SEED = _processing_cfg.get("random_seed", 42)
+DEFAULT_COMPRESSION: Compression = _processing_cfg.get("compression", "zstd")
+DEFAULT_MAX_SIZE = _processing_cfg.get("max_file_size_bytes", 512 * 1024 * 1024)
+LOG_FMT = _processing_cfg.get("logging", {}).get(
+    "format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+DEFAULT_INPUT_DIR = Path(
+    _paths_cfg.get("input_dir", "data/datasets/HuggingFaceFW/fineweb-edu")
+)
+DEFAULT_OUTPUT_DIR = Path(_paths_cfg.get("output_dir", "data/datasets/fineweb/en"))
 
 
 def _setup_logging(log_dir: Path, bucket: str) -> logging.Logger:
@@ -96,13 +109,22 @@ def process_all_buckets(
     buckets = buckets or get_all_bucket_configs()
     if parallel == 1:
         return [
-            _process_bucket(input_dir, output_dir, b, workers, seed, compression, max_size)
+            _process_bucket(
+                input_dir, output_dir, b, workers, seed, compression, max_size
+            )
             for b in buckets
         ]
     with ProcessPoolExecutor(max_workers=parallel) as pool:
         futures = [
             pool.submit(
-                _process_bucket, input_dir, output_dir, b, workers, seed, compression, max_size
+                _process_bucket,
+                input_dir,
+                output_dir,
+                b,
+                workers,
+                seed,
+                compression,
+                max_size,
             )
             for b in buckets
         ]
@@ -130,7 +152,7 @@ def main() -> int:
         "--output", type=Path, default=Path("data/datasets/fineweb/en"), help="输出目录"
     )
     parser.add_argument(
-        "--bucket", type=str, choices=BUCKET_NAMES, help="只处理指定评分桶"
+        "--bucket", type=str, choices=get_bucket_names(), help="只处理指定评分桶"
     )
     parser.add_argument(
         "--workers",
