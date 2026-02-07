@@ -11,142 +11,100 @@ from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.readers import ParquetReader
 
 from .adapters import fineweb_adapter
-from .bucket_config import BucketConfig, get_all_bucket_configs, get_bucket_config
+from .bucket_config import (
+    BUCKET_NAMES,
+    BucketConfig,
+    get_all_bucket_configs,
+    get_bucket_config,
+)
 from .cc_main_path_writer import CCMainPathWriter
 from .score_filter import ScoreFilter
 
-CompressionType = Literal["snappy", "gzip", "brotli", "lz4", "zstd"]
-
-DEFAULT_WORKERS = 8
-DEFAULT_SEED = 42
-DEFAULT_COMPRESSION: CompressionType = "zstd"
+Compression = Literal["snappy", "gzip", "brotli", "lz4", "zstd"]
+DEFAULT_WORKERS, DEFAULT_SEED = 8, 42
+DEFAULT_COMPRESSION: Compression = "zstd"
 DEFAULT_MAX_SIZE = 512 * 1024 * 1024
-BLOOM_CAPACITY = 2_000_000_000
-BLOOM_ERROR_RATE = 0.001
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 
-def _setup_logging(log_dir: Path, bucket_name: str) -> logging.Logger:
-    log_dir = log_dir / bucket_name
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    logger = logging.getLogger(f"fineweb_{bucket_name}")
+def _setup_logging(log_dir: Path, bucket: str) -> logging.Logger:
+    (path := log_dir / bucket).mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger(f"fineweb_{bucket}")
     logger.setLevel(logging.INFO)
-
     if not logger.handlers:
-        formatter = logging.Formatter(LOG_FORMAT)
-        file_handler = logging.FileHandler(log_dir / "processing.log")
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-
+        fmt = logging.Formatter(LOG_FMT)
+        logger.addHandler(h := logging.FileHandler(path / "processing.log"))
+        h.setFormatter(fmt)
+        logger.addHandler(ch := logging.StreamHandler(sys.stdout))
+        ch.setFormatter(fmt)
     return logger
 
 
 def _create_pipeline(
-    input_path: Path,
-    output_path: Path,
+    input_dir: Path,
+    output: Path,
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
     seed: int = DEFAULT_SEED,
-    compression: CompressionType = DEFAULT_COMPRESSION,
+    compression: Compression = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
 ) -> LocalPipelineExecutor:
     pipeline = [
         ParquetReader(
-            str(input_path), adapter=fineweb_adapter, glob_pattern="**/*.parquet"
+            str(input_dir), adapter=fineweb_adapter, glob_pattern="**/*.parquet"
         ),
-        ScoreFilter(
-            bucket=bucket,
-            random_seed=seed,
-            use_bloom_filter=True,
-            bloom_capacity=BLOOM_CAPACITY,
-            bloom_error_rate=BLOOM_ERROR_RATE,
-        ),
+        ScoreFilter(bucket=bucket, random_seed=seed),
         CCMainPathWriter(
-            output_folder=str(output_path),
-            compression=compression,
-            max_file_size=max_size,
+            output_folder=str(output), compression=compression, max_file_size=max_size
         ),
     ]
-
     return LocalPipelineExecutor(
         pipeline=pipeline,
         tasks=workers,
-        logging_dir=str(output_path.parent / "logs" / bucket.name),
+        logging_dir=str(output.parent / "logs" / bucket.name),
     )
 
 
-def _process_single_bucket(
-    input_path: Path,
-    output_base: Path,
+def _process_bucket(
+    input_dir: Path,
+    out_base: Path,
     bucket: BucketConfig,
     workers: int = DEFAULT_WORKERS,
     seed: int = DEFAULT_SEED,
-    compression: CompressionType = DEFAULT_COMPRESSION,
+    compression: Compression = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_SIZE,
 ) -> str:
-    output_path = output_base / bucket.name
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    logger = _setup_logging(output_base.parent / "logs", bucket.name)
+    out = out_base / bucket.name
+    out.mkdir(parents=True, exist_ok=True)
+    logger = _setup_logging(out_base.parent / "logs", bucket.name)
     logger.info(f"开始处理桶 {bucket.name}: {bucket}")
-
-    _create_pipeline(
-        input_path=input_path,
-        output_path=output_path,
-        bucket=bucket,
-        workers=workers,
-        seed=seed,
-        compression=compression,
-        max_size=max_size,
-    ).run()
-
+    _create_pipeline(input_dir, out, bucket, workers, seed, compression, max_size).run()
     logger.info(f"桶 {bucket.name} 处理完成")
     return bucket.name
 
 
 def process_all_buckets(
-    input_path: Path,
-    output_base: Path,
-    workers_per_bucket: int = DEFAULT_WORKERS,
-    random_seed: int = DEFAULT_SEED,
-    parallel_buckets: int = 1,
-    compression: CompressionType = DEFAULT_COMPRESSION,
-    max_file_size: int = DEFAULT_MAX_SIZE,
+    input_dir: Path,
+    output_dir: Path,
+    workers: int = DEFAULT_WORKERS,
+    seed: int = DEFAULT_SEED,
+    parallel: int = 1,
+    compression: Compression = DEFAULT_COMPRESSION,
+    max_size: int = DEFAULT_MAX_SIZE,
     buckets: list[BucketConfig] | None = None,
 ) -> list[str]:
     buckets = buckets or get_all_bucket_configs()
-
-    if parallel_buckets == 1:
+    if parallel == 1:
         return [
-            _process_single_bucket(
-                input_path,
-                output_base,
-                bucket,
-                workers_per_bucket,
-                random_seed,
-                compression,
-                max_file_size,
-            )
-            for bucket in buckets
+            _process_bucket(input_dir, output_dir, b, workers, seed, compression, max_size)
+            for b in buckets
         ]
-
-    with ProcessPoolExecutor(max_workers=parallel_buckets) as executor:
+    with ProcessPoolExecutor(max_workers=parallel) as pool:
         futures = [
-            executor.submit(
-                _process_single_bucket,
-                input_path,
-                output_base,
-                bucket,
-                workers_per_bucket,
-                random_seed,
-                compression,
-                max_file_size,
+            pool.submit(
+                _process_bucket, input_dir, output_dir, b, workers, seed, compression, max_size
             )
-            for bucket in buckets
+            for b in buckets
         ]
         return [f.result() for f in futures]
 
@@ -155,13 +113,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="FineWeb-Edu 数据集质量评分分桶重组工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
+        epilog="""示例:
   python -m src.data_processing.fineweb_reorganizer
   python -m src.data_processing.fineweb_reorganizer --bucket 3.0
   python -m src.data_processing.fineweb_reorganizer --workers 16 --seed 42
-  python -m src.data_processing.fineweb_reorganizer --parallel-buckets 4
-        """,
+  python -m src.data_processing.fineweb_reorganizer --parallel-buckets 4""",
     )
 
     parser.add_argument(
@@ -174,16 +130,13 @@ def main() -> int:
         "--output", type=Path, default=Path("data/datasets/fineweb/en"), help="输出目录"
     )
     parser.add_argument(
-        "--bucket",
-        type=str,
-        choices=["2.8", "3.0", "3.5", "4.0"],
-        help="只处理指定评分桶",
+        "--bucket", type=str, choices=BUCKET_NAMES, help="只处理指定评分桶"
     )
     parser.add_argument(
         "--workers",
         type=int,
         default=DEFAULT_WORKERS,
-        help=f"每个桶的并行 worker 数量（默认：{DEFAULT_WORKERS}）",
+        help=f"每个桶的 worker 数量（默认：{DEFAULT_WORKERS}）",
     )
     parser.add_argument(
         "--seed",
@@ -209,23 +162,22 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-
     if not args.input.exists():
         print(f"错误：输入目录不存在：{args.input}", file=sys.stderr)
         return 1
-
     args.output.mkdir(parents=True, exist_ok=True)
 
     try:
+        buckets = [get_bucket_config(args.bucket)] if args.bucket else None
         results = process_all_buckets(
-            input_path=args.input,
-            output_base=args.output,
-            workers_per_bucket=args.workers,
-            random_seed=args.seed,
-            parallel_buckets=args.parallel_buckets,
-            compression=args.compression,  # type: ignore[arg-type]
-            max_file_size=args.max_file_size,
-            buckets=[get_bucket_config(args.bucket)] if args.bucket else None,
+            args.input,
+            args.output,
+            args.workers,
+            args.seed,
+            args.parallel_buckets,
+            args.compression,
+            args.max_file_size,
+            buckets,  # type: ignore[arg-type]
         )
         print(f"处理完成：{', '.join(results)}")
         return 0
