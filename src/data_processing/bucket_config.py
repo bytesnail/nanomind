@@ -1,9 +1,6 @@
-"""评分桶配置。"""
-
 from dataclasses import dataclass
-from typing import Final
 
-EPSILON: Final = 1e-6
+EPSILON = 1e-6
 
 
 @dataclass(frozen=True)
@@ -14,8 +11,8 @@ class BucketConfig:
     sampling_rate: float
 
     def contains(self, score: float) -> bool:
-        min_ok = score >= self.min_score - EPSILON
-        return min_ok if self.max_score is None else min_ok and score < self.max_score
+        ok = score >= self.min_score - EPSILON
+        return ok if self.max_score is None else ok and score < self.max_score
 
     def __repr__(self) -> str:
         interval = (
@@ -26,14 +23,16 @@ class BucketConfig:
         return f"BucketConfig(name='{self.name}', interval={interval}, sampling_rate={self.sampling_rate:.0%})"
 
 
-DEFAULT_BUCKETS: Final = [
+DEFAULT_BUCKETS = [
     BucketConfig("2.8", 2.8, 3.0, 0.30),
     BucketConfig("3.0", 3.0, 3.5, 0.60),
     BucketConfig("3.5", 3.5, 4.0, 0.80),
     BucketConfig("4.0", 4.0, None, 1.0),
 ]
 
-_BUCKET_MAP: Final = {b.name: b for b in DEFAULT_BUCKETS}
+BUCKET_NAMES = [b.name for b in DEFAULT_BUCKETS]
+SAMPLING_RATES = {b.name: b.sampling_rate for b in DEFAULT_BUCKETS}
+_BUCKET_MAP = {b.name: b for b in DEFAULT_BUCKETS}
 
 
 def get_bucket_config(name: str) -> BucketConfig:
