@@ -1,0 +1,22 @@
+# FineWeb-Edu 数据集字段配置
+
+fineweb_edu:
+  # 数据集根目录标记（用于生成唯一ID）
+  root_marker: "fineweb-edu"
+  
+  # 必需字段（输出文件必须包含）
+  required_fields:
+    - id
+    - text
+    - score
+  
+  # 输入字段映射
+  input_fields:
+    text: "text"
+    score: "score"
+    dump: "dump"  # 用于提取 cc_main 信息
+  
+  # 元数据字段映射
+  metadata:
+    score: "score"
+    cc_main: "dump"  # 从 dump 字段提取，需前缀检查 "CC-MAIN-"
