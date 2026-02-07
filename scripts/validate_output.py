@@ -10,10 +10,15 @@ from typing import Any
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
-from src.data_processing.bucket_config import get_all_bucket_configs, get_bucket_config
+from src.data_processing.bucket_config import (
+    get_all_bucket_configs,
+    get_bucket_config,
+    get_bucket_names,
+)
+from src.data_processing.config_loader import get_config
 
 logger = logging.getLogger(__name__)
-REQUIRED_FIELDS = {"id", "text", "score"}
+REQUIRED_FIELDS = get_config().get_required_fields()
 
 
 def _validate_schema(path: Path) -> tuple[bool, list[str]]:
@@ -182,7 +187,7 @@ def main() -> int:
 
     parser.add_argument("--input", type=Path, required=True, help="输入目录")
     parser.add_argument(
-        "--bucket", type=str, choices=["2.8", "3.0", "3.5", "4.0"], help="只验证指定桶"
+        "--bucket", type=str, choices=get_bucket_names(), help="只验证指定桶"
     )
     parser.add_argument("--verbose", action="store_true", help="显示详细错误信息")
     parser.add_argument("--json", type=Path, help="将结果保存为 JSON 文件")

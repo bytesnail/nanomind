@@ -11,12 +11,17 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 
 from src.data_processing.bucket_config import (
-    BUCKET_NAMES,
-    SAMPLING_RATES,
     find_bucket_for_score,
+    get_bucket_names,
+    get_sampling_rates,
 )
+from src.data_processing.config_loader import get_config
 from src.data_processing.fineweb_reorganizer import process_all_buckets
 from scripts.validate_output import _print_report, _validate_all as validate_all_buckets
+
+_cfg = get_config()
+_processing_cfg = _cfg.processing
+_paths_cfg = _cfg.paths
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -70,8 +75,11 @@ def _run_processing(
     logger.info(f"随机种子: {seed}")
     logger.info("=" * 60)
 
+    _trial_cfg = _processing_cfg.get("trial", {})
+    compression = _processing_cfg.get("compression", "zstd")
+    max_size = _trial_cfg.get("max_file_size_bytes", 128 * 1024 * 1024)
     results = process_all_buckets(
-        input_dir, output_dir, workers, seed, 1, "zstd", 128 * 1024 * 1024
+        input_dir, output_dir, workers, seed, 1, compression, max_size
     )
     logger.info(f"处理完成: {results}")
     return {"processed_buckets": results}
@@ -89,8 +97,10 @@ def _analyze_sampling(input_dir: Path, output_dir: Path) -> dict:
     logger.info("分析采样准确性")
     logger.info("=" * 60)
 
-    input_cnt = {b: 0 for b in BUCKET_NAMES}
-    out_cnt = {b: 0 for b in BUCKET_NAMES}
+    bucket_names = get_bucket_names()
+    sampling_rates = get_sampling_rates()
+    input_cnt = {b: 0 for b in bucket_names}
+    out_cnt = {b: 0 for b in bucket_names}
 
     for f in tqdm(list(input_dir.rglob("*.parquet"))[:10], desc="统计输入"):
         try:
@@ -102,7 +112,7 @@ def _analyze_sampling(input_dir: Path, output_dir: Path) -> dict:
         except Exception as e:
             logger.warning(f"读取文件 {f} 失败: {e}")
 
-    for b in BUCKET_NAMES:
+    for b in bucket_names:
         d = output_dir / b
         if d.exists():
             for f in d.rglob("*.parquet"):
@@ -113,9 +123,9 @@ def _analyze_sampling(input_dir: Path, output_dir: Path) -> dict:
 
     print("\n采样准确性分析:")
     print("-" * 60)
-    for b in BUCKET_NAMES:
+    for b in bucket_names:
         ic, oc = input_cnt[b], out_cnt[b]
-        exp = SAMPLING_RATES[b]
+        exp = sampling_rates[b]
         if ic > 0:
             actual = oc / ic
             err = abs(actual - exp) / exp * 100
@@ -139,21 +149,37 @@ def main() -> int:
   python scripts/trial_run.py --workers 4""",
     )
 
+    _trial_cfg = _processing_cfg.get("trial", {})
     parser.add_argument(
         "--source",
         type=Path,
-        default=Path("data/datasets/HuggingFaceFW/fineweb-edu/data"),
+        default=Path(
+            _paths_cfg.get("input_dir", "data/datasets/HuggingFaceFW/fineweb-edu")
+        )
+        / "data",
     )
     parser.add_argument(
-        "--test-input", type=Path, default=Path("data/datasets/test_fineweb_input")
+        "--test-input",
+        type=Path,
+        default=Path(
+            _paths_cfg.get("trial_input_dir", "data/datasets/test_fineweb_input")
+        ),
     )
     parser.add_argument(
-        "--test-output", type=Path, default=Path("data/datasets/test_fineweb_output")
+        "--test-output",
+        type=Path,
+        default=Path(
+            _paths_cfg.get("trial_output_dir", "data/datasets/test_fineweb_output")
+        ),
     )
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--max-files", type=int, default=5)
-    parser.add_argument("--max-rows", type=int, default=2000)
+    parser.add_argument(
+        "--seed", type=int, default=_processing_cfg.get("random_seed", 42)
+    )
+    parser.add_argument("--max-files", type=int, default=_trial_cfg.get("max_files", 5))
+    parser.add_argument(
+        "--max-rows", type=int, default=_trial_cfg.get("max_rows", 2000)
+    )
     parser.add_argument("--skip-create-test", action="store_true")
     parser.add_argument("--skip-processing", action="store_true")
     parser.add_argument("--analyze-sampling", action="store_true")
