@@ -1,44 +1,43 @@
 """FineWeb-Edu 数据适配器。"""
 
+from pathlib import Path
 from typing import Any
 
+DATASET_ROOT_MARKER = "fineweb-edu"
 
-def _extract(raw: dict) -> dict[str, Any] | None:
-    text, doc_id = raw.get("text", ""), raw.get("id", "")
-    if not text or not doc_id:
+
+def _generate_unique_id(source_path: str, idx: int) -> str:
+    """从 source_path 提取相对路径并与 idx 组合为唯一 ID。"""
+    if not source_path:
+        raise ValueError("source_path cannot be empty")
+    if idx < 0:
+        raise ValueError(f"idx must be non-negative, got {idx}")
+
+    path = Path(source_path)
+    try:
+        marker_idx = path.parts.index(DATASET_ROOT_MARKER)
+        relative_path = "/".join(path.parts[marker_idx + 1 :])
+    except ValueError:
+        relative_path = path.as_posix()
+
+    return f"{relative_path}#{idx}"
+
+
+def fineweb_adapter(
+    _reader: Any, raw: dict, source: str, idx: int, *, raise_on_error: bool = False
+) -> dict[str, Any] | None:
+    """FineWeb-Edu 数据适配器。text 缺失/为空时：raise_on_error 控制抛错或返回 None。"""
+    if not (text := raw.get("text", "")):
+        if raise_on_error:
+            raise ValueError("text is missing or empty")
         return None
 
     dump = raw.get("dump", "")
     return {
         "text": text,
-        "id": doc_id,
+        "id": _generate_unique_id(source, idx),
         "metadata": {
             "score": raw.get("score", 0.0),
             "cc_main": dump if dump.startswith("CC-MAIN-") else "unknown",
         },
     }
-
-
-def fineweb_adapter(
-    _reader, raw: dict, _source: str, _idx: int, *, raise_on_error: bool = False
-) -> dict[str, Any] | None:
-    """FineWeb-Edu 数据适配器。
-
-    Args:
-        _reader: 读取器实例（由 datatrove 传入，当前未使用）
-        raw: 原始数据字典
-        _source: 数据源文件路径（由 datatrove 传入，当前未使用）
-        _idx: 数据在文件中的索引（由 datatrove 传入，当前未使用）
-        raise_on_error: 如果为 True，当数据无效时抛出 ValueError；
-                       如果为 False（默认），返回 None
-
-    Returns:
-        转换后的数据字典，如果 raise_on_error=False 且数据无效则返回 None
-
-    Raises:
-        ValueError: 如果 raise_on_error=True 且数据缺少必需的 text 或 id 字段
-    """
-    result = _extract(raw)
-    if result is None and raise_on_error:
-        raise ValueError("Missing required field: text or id")
-    return result

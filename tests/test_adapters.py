@@ -5,91 +5,101 @@ import pytest
 from src.data_processing.adapters import fineweb_adapter
 
 
-class MockReader:
-    pass
+@pytest.fixture
+def reader():
+    return object()
 
 
-class TestFinewebAdapter:
-    def test_valid_input(self):
-        mock = MockReader()
+@pytest.fixture
+def valid_raw():
+    return {"text": "Test document", "score": 3.5, "dump": "CC-MAIN-2024-10"}
+
+
+class TestIdGeneration:
+    @pytest.mark.parametrize(
+        "source,idx,expected",
+        [
+            ("train.parquet", 0, "train.parquet#0"),
+            ("train.parquet", 42, "train.parquet#42"),
+            (
+                "data/CC-MAIN-2013-20/train.parquet",
+                0,
+                "data/CC-MAIN-2013-20/train.parquet#0",
+            ),
+            (
+                "data/datasets/HuggingFaceFW/fineweb-edu/data/CC-MAIN-2013-20/train.parquet",
+                1,
+                "data/CC-MAIN-2013-20/train.parquet#1",
+            ),
+            (
+                "data/other-dataset/train.parquet",
+                0,
+                "data/other-dataset/train.parquet#0",
+            ),
+        ],
+    )
+    def test_id_generation(self, reader, valid_raw, source, idx, expected):
+        result = fineweb_adapter(reader, valid_raw, source, idx)
+        assert result["id"] == expected
+
+
+class TestDataExtraction:
+    def test_full_extraction(self, reader):
         raw = {
             "text": "This is a test document.",
-            "id": "test-id-123",
             "score": 3.5,
             "dump": "CC-MAIN-2024-10",
             "url": "https://example.com",
         }
-        result = fineweb_adapter(mock, raw, "test.parquet", 0)
-        assert result is not None
+        result = fineweb_adapter(reader, raw, "test.parquet", 0)
         assert result["text"] == "This is a test document."
-        assert result["id"] == "test-id-123"
         assert result["metadata"]["score"] == 3.5
         assert result["metadata"]["cc_main"] == "CC-MAIN-2024-10"
+        assert "url" not in result["metadata"]
 
-    def test_missing_text(self):
-        mock = MockReader()
-        raw = {"id": "test-id-123", "score": 3.5}
-        with pytest.raises(ValueError):
-            fineweb_adapter(mock, raw, "test.parquet", 0, raise_on_error=True)
-
-    def test_missing_id(self):
-        mock = MockReader()
-        raw = {"text": "This is a test document.", "score": 3.5}
-        with pytest.raises(ValueError):
-            fineweb_adapter(mock, raw, "test.parquet", 0, raise_on_error=True)
-
-    def test_empty_text(self):
-        mock = MockReader()
-        raw = {"text": "", "id": "test-id-123", "score": 3.5}
-        with pytest.raises(ValueError):
-            fineweb_adapter(mock, raw, "test.parquet", 0, raise_on_error=True)
-
-    def test_missing_score(self):
-        mock = MockReader()
-        raw = {"text": "Test", "id": "test-id", "dump": "CC-MAIN-2024-10"}
-        result = fineweb_adapter(mock, raw, "test.parquet", 0)
-        assert result is not None
+    def test_default_score(self, reader):
+        result = fineweb_adapter(
+            reader, {"text": "Test", "dump": "CC-MAIN-2024-10"}, "test.parquet", 0
+        )
         assert result["metadata"]["score"] == 0.0
 
-    def test_invalid_dump_format(self):
-        mock = MockReader()
-        raw = {"text": "Test", "id": "test-id", "score": 3.5, "dump": "invalid"}
-        result = fineweb_adapter(mock, raw, "test.parquet", 0)
-        assert result is not None
+    def test_unknown_cc_main_for_invalid_dump(self, reader):
+        result = fineweb_adapter(
+            reader,
+            {"text": "Test", "score": 3.5, "dump": "invalid-format"},
+            "test.parquet",
+            0,
+        )
         assert result["metadata"]["cc_main"] == "unknown"
 
-    def test_extra_fields_filtered(self):
-        mock = MockReader()
-        raw = {
-            "text": "Test",
-            "id": "test-id",
-            "score": 3.5,
-            "dump": "CC-MAIN-2024-10",
-            "url": "https://example.com",
-        }
-        result = fineweb_adapter(mock, raw, "test.parquet", 0)
-        assert result is not None
-        assert "url" not in result["metadata"]
-        assert "score" in result["metadata"]
-        assert "cc_main" in result["metadata"]
+
+class TestErrorHandling:
+    @pytest.mark.parametrize(
+        "invalid_data",
+        [
+            {"id": "test-id", "score": 3.5},
+            {"text": "", "id": "test-id", "score": 3.5},
+        ],
+    )
+    def test_missing_or_empty_text_raises(self, reader, invalid_data):
+        with pytest.raises(ValueError, match="text is missing or empty"):
+            fineweb_adapter(
+                reader, invalid_data, "test.parquet", 0, raise_on_error=True
+            )
+
+    def test_returns_none_by_default(self, reader):
+        assert fineweb_adapter(reader, {"score": 3.5}, "test.parquet", 0) is None
+        assert (
+            fineweb_adapter(reader, {"text": "", "score": 3.5}, "test.parquet", 0)
+            is None
+        )
 
 
-class TestFinewebAdapterSafeMode:
-    """测试默认安全模式（raise_on_error=False）。"""
+class TestInputValidation:
+    def test_negative_idx_raises(self, reader, valid_raw):
+        with pytest.raises(ValueError, match="idx must be non-negative"):
+            fineweb_adapter(reader, valid_raw, "test.parquet", -1)
 
-    def test_valid_input(self):
-        mock = MockReader()
-        raw = {"text": "Test", "id": "test-id", "score": 3.5, "dump": "CC-MAIN-2024-10"}
-        result = fineweb_adapter(mock, raw, "test.parquet", 0)
-        assert result is not None
-        assert result["text"] == "Test"
-
-    def test_invalid_input_returns_none(self):
-        mock = MockReader()
-        raw = {"id": "test-id", "score": 3.5}
-        assert fineweb_adapter(mock, raw, "test.parquet", 0) is None
-
-    def test_empty_text_returns_none(self):
-        mock = MockReader()
-        raw = {"text": "", "id": "test-id", "score": 3.5}
-        assert fineweb_adapter(mock, raw, "test.parquet", 0) is None
+    def test_empty_source_path_raises(self, reader, valid_raw):
+        with pytest.raises(ValueError, match="source_path cannot be empty"):
+            fineweb_adapter(reader, valid_raw, "", 0)
