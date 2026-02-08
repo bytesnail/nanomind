@@ -1,11 +1,11 @@
 from pathlib import Path
-from typing import Literal
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 from datatrove.pipeline.base import PipelineStep
 
 from .bucket_config import BucketConfig
+from .config_loader import DEFAULT_COMPRESSION, DEFAULT_MAX_FILE_SIZE, Compression
 
 
 class BucketPathWriter(PipelineStep):
@@ -13,8 +13,8 @@ class BucketPathWriter(PipelineStep):
         self,
         output_dir: str,
         buckets: list[BucketConfig],
-        compression: Literal["snappy", "gzip", "brotli", "lz4", "zstd"] = "zstd",
-        max_file_size: int = 512 * 1024 * 1024,
+        compression: Compression = DEFAULT_COMPRESSION,
+        max_file_size: int = DEFAULT_MAX_FILE_SIZE,
     ):
         super().__init__()
         self.output_dir = Path(output_dir)
@@ -43,11 +43,13 @@ class BucketPathWriter(PipelineStep):
         filepath = (
             self.output_dir / name / f"{self._rank:05d}_{state['counter']:05d}.parquet"
         )
-        pq.write_table(
-            pa.table({k: [d[k] for d in buffer] for k in ("text", "id", "score")}),
-            filepath,
-            compression=self.compression,
-        )
+
+        texts = [doc["text"] for doc in buffer]
+        ids = [doc["id"] for doc in buffer]
+        scores = [doc["score"] for doc in buffer]
+
+        table = pa.table({"text": texts, "id": ids, "score": scores})
+        pq.write_table(table, filepath, compression=self.compression)
 
         state["counter"] += 1
         state["buffer"] = []
@@ -56,6 +58,9 @@ class BucketPathWriter(PipelineStep):
     def _flush_all(self) -> None:
         for name in self._states:
             self._flush_bucket(name)
+
+    def close(self) -> None:
+        self._flush_all()
 
     def run(self, data, rank: int = 0, world_size: int = 1) -> None:
         self._rank = rank
@@ -78,5 +83,3 @@ class BucketPathWriter(PipelineStep):
             self.stat_update(f"written_{name}", value=1)
 
         self._flush_all()
-
-    close = _flush_all

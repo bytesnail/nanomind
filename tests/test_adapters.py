@@ -1,6 +1,6 @@
 import pytest
 
-from src.data_processing.adapters import fineweb_adapter
+from src.data_processing.adapters import fineweb_adapter, normalize_score
 
 
 @pytest.fixture
@@ -11,6 +11,25 @@ def reader():
 @pytest.fixture
 def valid_raw():
     return {"text": "Test document", "score": 3.5, "dump": "CC-MAIN-2024-10"}
+
+
+class TestScoreNormalization:
+    def test_no_normalization(self):
+        assert normalize_score(3.5, None) == 3.5
+        assert normalize_score(3.5, {"enabled": False}) == 3.5
+
+    def test_with_normalization(self):
+        config = {"enabled": True, "multiplier": 5.0}
+        assert normalize_score(0.6, config) == 3.0
+        assert normalize_score(0.8, config) == 4.0
+        assert normalize_score(0.4, config) == 2.0
+
+    def test_default_multiplier(self):
+        config = {"enabled": True}
+        assert normalize_score(0.5, config) == 0.5
+
+    def test_none_score(self):
+        assert normalize_score(None, None) == 0.0
 
 
 class TestIdGeneration:
@@ -30,9 +49,9 @@ class TestIdGeneration:
                 "data/CC-MAIN-2013-20/train.parquet#1",
             ),
             (
-                "data/other-dataset/train.parquet",
+                "data/datasets/opencsg/Fineweb-Edu-Chinese-V2.1/data/train.parquet",
                 0,
-                "data/other-dataset/train.parquet#0",
+                "data/train.parquet#0",
             ),
         ],
     )

@@ -2,13 +2,13 @@ import hashlib
 
 from datatrove.pipeline.base import PipelineStep
 
-from .bucket_config import BucketConfig, find_bucket_for_score
+from .bucket_config import BucketConfig, _find_bucket_in_sorted
 
 
 class ScoreFilter(PipelineStep):
     def __init__(self, buckets: list[BucketConfig], random_seed: int = 42):
         super().__init__()
-        self._buckets = {b.name: b for b in buckets}
+        self.buckets = buckets
         self.random_seed = random_seed
 
     def _should_sample(self, doc_id: str, rate: float) -> bool:
@@ -26,13 +26,12 @@ class ScoreFilter(PipelineStep):
                 continue
 
             score = float(score)
-            bucket = find_bucket_for_score(score)
-            if bucket is None or bucket.name not in self._buckets:
+            bucket = _find_bucket_in_sorted(score, self.buckets)
+            if bucket is None:
                 self.stat_update("filtered_out", value=1)
                 continue
 
-            actual_bucket = self._buckets[bucket.name]
-            if self._should_sample(doc.id, actual_bucket.sampling_rate):
+            if self._should_sample(doc.id, bucket.sampling_rate):
                 doc.metadata["__target_bucket"] = bucket.name
                 self.stat_update(f"kept_{bucket.name}", value=1)
                 yield doc

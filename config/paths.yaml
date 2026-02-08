@@ -1,5 +1,3 @@
-input_dir: "data/datasets/HuggingFaceFW/fineweb-edu"
-output_dir: "data/datasets/fineweb/en"
 log_dir: "logs/fineweb_processing"
 trial_input_dir: "data/datasets/test_fineweb_input"
 trial_output_dir: "data/datasets/test_fineweb_output"

@@ -1,56 +1,58 @@
-import argparse
 import logging
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.readers import ParquetReader
 
 from .adapters import fineweb_adapter
-from .bucket_config import (
-    BucketConfig,
-    get_all_bucket_configs,
-    get_bucket_config,
-    get_bucket_names,
-)
+from .bucket_config import BucketConfig, get_all_bucket_configs
 from .bucket_path_writer import BucketPathWriter
-from .config_loader import get_config
+from .config_loader import (
+    DEFAULT_COMPRESSION,
+    DEFAULT_LOG_FORMAT,
+    DEFAULT_MAX_FILE_SIZE,
+    DEFAULT_RANDOM_SEED,
+    DEFAULT_TASKS,
+    DEFAULT_WORKERS,
+    Compression,
+    get_dataset_configs,
+    get_processing_config,
+)
 from .score_filter import ScoreFilter
 
-Compression = Literal["snappy", "gzip", "brotli", "lz4", "zstd"]
+__all__ = [
+    "create_pipeline",
+    "get_default_config",
+    "main",
+    "process_all_datasets",
+    "process_single_dataset",
+    "setup_logging",
+]
 
 
 @lru_cache(maxsize=1)
-def _defaults():
-    cfg = get_config()
-    processing = cfg.processing
-    paths = cfg.paths
+def get_default_config():
+    processing = get_processing_config()
     return {
-        "workers": processing.get("workers", 8),
-        "tasks": processing.get("tasks", 8),
-        "seed": processing.get("random_seed", 42),
-        "compression": processing.get("compression", "zstd"),
-        "max_size": processing.get("max_file_size_bytes", 512 * 1024 * 1024),
-        "input_dir": Path(
-            paths.get("input_dir", "data/datasets/HuggingFaceFW/fineweb-edu")
-        ),
-        "output_dir": Path(paths.get("output_dir", "data/datasets/fineweb/en")),
-        "log_format": processing.get("logging", {}).get(
-            "format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        ),
+        "workers": processing.get("workers", DEFAULT_WORKERS),
+        "tasks": processing.get("tasks", DEFAULT_TASKS),
+        "random_seed": processing.get("random_seed", DEFAULT_RANDOM_SEED),
+        "compression": processing.get("compression", DEFAULT_COMPRESSION),
+        "max_size": processing.get("max_file_size_bytes", DEFAULT_MAX_FILE_SIZE),
+        "log_format": processing.get("logging", {}).get("format", DEFAULT_LOG_FORMAT),
     }
 
 
-def _setup_logging(log_dir: Path, name: str) -> logging.Logger:
+def setup_logging(log_dir: Path, name: str) -> logging.Logger:
     log_path = log_dir / name
     log_path.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(f"fineweb_{name}")
     if logger.handlers:
         return logger
     logger.setLevel(logging.INFO)
-    fmt = logging.Formatter(_defaults()["log_format"])
+    fmt = logging.Formatter(get_default_config()["log_format"])
     logger.addHandler(logging.FileHandler(log_path / "processing.log"))
     logger.addHandler(logging.StreamHandler(sys.stdout))
     for h in logger.handlers:
@@ -58,15 +60,15 @@ def _setup_logging(log_dir: Path, name: str) -> logging.Logger:
     return logger
 
 
-def _create_pipeline(
+def create_pipeline(
     input_dir: Path,
     output_dir: Path,
     buckets: list[BucketConfig],
-    workers: int = 8,
-    tasks: int = 8,
-    seed: int = 42,
-    compression: Compression = "zstd",
-    max_size: int = 512 * 1024 * 1024,
+    workers: int = DEFAULT_WORKERS,
+    tasks: int = DEFAULT_TASKS,
+    random_seed: int = DEFAULT_RANDOM_SEED,
+    compression: Compression = DEFAULT_COMPRESSION,
+    max_size: int = DEFAULT_MAX_FILE_SIZE,
 ) -> LocalPipelineExecutor:
     log_name = "multi_bucket" if len(buckets) > 1 else buckets[0].name
     return LocalPipelineExecutor(
@@ -74,7 +76,7 @@ def _create_pipeline(
             ParquetReader(
                 str(input_dir), adapter=fineweb_adapter, glob_pattern="**/*.parquet"
             ),
-            ScoreFilter(buckets=buckets, random_seed=seed),
+            ScoreFilter(buckets=buckets, random_seed=random_seed),
             BucketPathWriter(
                 output_dir=str(output_dir),
                 buckets=buckets,
@@ -88,103 +90,97 @@ def _create_pipeline(
     )
 
 
-def process_all_buckets(
+def process_single_dataset(
     input_dir: Path,
     output_dir: Path,
-    workers: int = 8,
-    tasks: int = 8,
-    seed: int = 42,
-    compression: Compression = "zstd",
-    max_size: int = 512 * 1024 * 1024,
-    buckets: list[BucketConfig] | None = None,
+    buckets: list[BucketConfig],
+    workers: int = DEFAULT_WORKERS,
+    tasks: int = DEFAULT_TASKS,
+    random_seed: int = DEFAULT_RANDOM_SEED,
+    compression: Compression = DEFAULT_COMPRESSION,
+    max_size: int = DEFAULT_MAX_FILE_SIZE,
 ) -> list[str]:
-    buckets = buckets or get_all_bucket_configs()
-    is_multi = len(buckets) > 1
-    log_name = "multi_bucket" if is_multi else buckets[0].name
-    logger = _setup_logging(output_dir.parent / "logs", log_name)
+    log_name = f"multi_bucket_{output_dir.name}"
+    logger = setup_logging(output_dir.parent / "logs", log_name)
     names = ", ".join(b.name for b in buckets)
-    logger.info(f"开始处理{'多桶' if is_multi else '单桶'}: {names}")
+    logger.info(f"开始处理数据集: {names}")
 
-    out = output_dir if is_multi else output_dir / buckets[0].name
-    out.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    _create_pipeline(
-        input_dir, out, buckets, workers, tasks, seed, compression, max_size
+    create_pipeline(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        buckets=buckets,
+        workers=workers,
+        tasks=tasks,
+        random_seed=random_seed,
+        compression=compression,
+        max_size=max_size,
     ).run()
     logger.info(f"处理完成: {names}")
     return [b.name for b in buckets]
 
 
-def main() -> int:
-    defaults = _defaults()
-    parser = argparse.ArgumentParser(
-        description="FineWeb-Edu 数据集质量评分分桶重组工具",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""示例:
-  python -m src.data_processing.fineweb_reorganizer
-  python -m src.data_processing.fineweb_reorganizer --bucket 3.0
-  python -m src.data_processing.fineweb_reorganizer --workers 16 --seed 42""",
-    )
-    parser.add_argument(
-        "--input", type=Path, default=defaults["input_dir"], help="源数据目录"
-    )
-    parser.add_argument(
-        "--output", type=Path, default=defaults["output_dir"], help="输出目录"
-    )
-    parser.add_argument(
-        "--bucket", type=str, choices=get_bucket_names(), help="只处理指定评分桶"
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=defaults["workers"],
-        help=f"worker数量(默认:{defaults['workers']})",
-    )
-    parser.add_argument(
-        "--tasks",
-        type=int,
-        default=defaults["tasks"],
-        help=f"tasks数量(默认:{defaults['tasks']})",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=defaults["seed"],
-        help=f"随机种子(默认:{defaults['seed']})",
-    )
-    parser.add_argument(
-        "--compression",
-        type=str,
-        default=defaults["compression"],
-        choices=["zstd", "gzip", "snappy", "brotli", "lz4"],
-        help=f"压缩格式(默认:{defaults['compression']})",
-    )
-    parser.add_argument(
-        "--max-file-size",
-        type=int,
-        default=defaults["max_size"],
-        help=f"单文件最大字节(默认:{defaults['max_size'] // (1024 * 1024)}MB)",
-    )
+def process_all_datasets(
+    workers: int = 0,
+    tasks: int = 0,
+    random_seed: int = 0,
+    compression: Compression = DEFAULT_COMPRESSION,
+    max_size: int = 0,
+) -> dict[str, list[str]]:
+    defaults = get_default_config()
+    workers = workers if workers > 0 else defaults["workers"]
+    tasks = tasks if tasks > 0 else defaults["tasks"]
+    random_seed = random_seed if random_seed != 0 else defaults["random_seed"]
+    compression = compression if compression else defaults["compression"]
+    max_size = max_size if max_size > 0 else defaults["max_size"]
 
-    args = parser.parse_args()
-    if not args.input.exists():
-        print(f"错误：输入目录不存在：{args.input}", file=sys.stderr)
-        return 1
-    args.output.mkdir(parents=True, exist_ok=True)
+    dataset_configs = get_dataset_configs()
+
+    results = {}
+    for lang, dataset_config in dataset_configs.items():
+        input_dir = Path(dataset_config.get("input_dir", ""))
+        output_dir = Path(dataset_config.get("output_dir", ""))
+
+        if not input_dir.exists():
+            print(f"警告：输入目录不存在，跳过 {lang}: {input_dir}", file=sys.stderr)
+            continue
+
+        buckets = get_all_bucket_configs(lang)
+        if not buckets:
+            print(f"警告：未找到评分桶配置，跳过 {lang}", file=sys.stderr)
+            continue
+
+        print(f"\n处理数据集 [{lang}]: {dataset_config.get('name', lang)}")
+        print(f"  输入: {input_dir}")
+        print(f"  输出: {output_dir}")
+
+        result = process_single_dataset(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            buckets=buckets,
+            workers=workers,
+            tasks=tasks,
+            random_seed=random_seed,
+            compression=compression,
+            max_size=max_size,
+        )
+        results[lang] = result
+
+    return results
+
+
+def main() -> int:
+    print("FineWeb-Edu 数据集质量评分分桶重组工具")
+    print("=" * 50)
 
     try:
-        buckets = [get_bucket_config(args.bucket)] if args.bucket else None
-        results = process_all_buckets(
-            args.input,
-            args.output,
-            args.workers,
-            args.tasks,
-            args.seed,
-            args.compression,
-            args.max_file_size,
-            buckets,
-        )
-        print(f"处理完成：{', '.join(results)}")
+        results = process_all_datasets()
+
+        print("\n" + "=" * 50)
+        print("所有数据集处理完成")
+        for lang, buckets in results.items():
+            print(f"  [{lang}]: {', '.join(buckets)}")
         return 0
     except Exception as e:
         print(f"处理失败：{e}", file=sys.stderr)

@@ -1,4 +1,3 @@
-import argparse
 import json
 import logging
 import sys
@@ -8,17 +7,18 @@ from typing import Any
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.data_processing.bucket_config import (
+    find_bucket_for_score,
     get_all_bucket_configs,
-    get_bucket_config,
-    get_bucket_names,
 )
+from src.data_processing.config_loader import get_dataset_configs
 
 logger = logging.getLogger(__name__)
 REQUIRED_FIELDS = {"id", "text", "score"}
 
 
-def _validate_file(path: Path, bucket_name: str) -> list[str]:
+def validate_file(path: Path, bucket_name: str, dataset_key: str) -> list[str]:
     errors = []
     try:
         table = pq.read_table(path)
@@ -32,19 +32,26 @@ def _validate_file(path: Path, bucket_name: str) -> list[str]:
             errors.append(f"缺少必需字段: {REQUIRED_FIELDS - cols}")
 
         if "score" in cols:
-            bucket = get_bucket_config(bucket_name)
             scores = table.column("score").to_pylist()
-            bad = sum(1 for s in scores if not bucket.contains(s))
+            bad = sum(
+                1
+                for s in scores
+                if (b := find_bucket_for_score(s, dataset_key)) is None
+                or b.name != bucket_name
+            )
             if bad:
-                mx = "+∞" if bucket.max_score is None else str(bucket.max_score)
-                errors.append(f"{bad}条记录不在范围[{bucket.min_score}, {mx})")
+                bucket = get_all_bucket_configs(dataset_key)
+                target = next((b for b in bucket if b.name == bucket_name), None)
+                if target:
+                    mx = "+∞" if target.max_score is None else str(target.max_score)
+                    errors.append(f"{bad}条记录不在范围[{target.min_score}, {mx})")
     except Exception as e:
         errors.append(f"读取失败: {e}")
 
     return errors
 
 
-def _collect_stats(files: list[Path]) -> dict[str, Any]:
+def collect_stats(files: list[Path]) -> dict[str, Any]:
     total_size = sum(f.stat().st_size for f in files)
     record_count = 0
     for f in files:
@@ -59,7 +66,7 @@ def _collect_stats(files: list[Path]) -> dict[str, Any]:
     }
 
 
-def _validate_bucket(path: Path, name: str) -> dict:
+def validate_bucket(path: Path, name: str, dataset_key: str) -> dict:
     result = {
         "bucket_name": name,
         "valid": True,
@@ -77,20 +84,18 @@ def _validate_bucket(path: Path, name: str) -> dict:
         return {**result, "valid": False, "errors": ["桶中没有parquet文件"]}
 
     for f in tqdm(files, desc=f"验证桶 {name}"):
-        errs = _validate_file(f, name)
+        errs = validate_file(f, name, dataset_key)
         if errs:
             result["valid"] = False
             result["error_count"] += len(errs)
             result["errors"].extend(f"{f}: {e}" for e in errs)
 
-    result["stats"] = _collect_stats(files)
+    result["stats"] = collect_stats(files)
     return result
 
 
-def _validate_all(base: Path, bucket_name: str | None = None) -> dict:
-    buckets = (
-        [get_bucket_config(bucket_name)] if bucket_name else get_all_bucket_configs()
-    )
+def validate_all_buckets(base: Path, dataset_key: str) -> dict:
+    buckets = get_all_bucket_configs(dataset_key)
     results = {
         "valid": True,
         "buckets": {},
@@ -103,33 +108,28 @@ def _validate_all(base: Path, bucket_name: str | None = None) -> dict:
     }
 
     for b in buckets:
-        r = _validate_bucket(base / b.name, b.name)
+        r = validate_bucket(base / b.name, b.name, dataset_key)
         results["buckets"][b.name] = r
         results["valid"] &= r["valid"]
-        for key in ("total_files", "total_errors", "total_records"):
-            results["summary"][key] += (
-                r["file_count"]
-                if key == "total_files"
-                else r["error_count"]
-                if key == "total_errors"
-                else r["stats"].get("record_count", 0)
-            )
+        results["summary"]["total_files"] += r["file_count"]
+        results["summary"]["total_errors"] += r["error_count"]
+        results["summary"]["total_records"] += r["stats"].get("record_count", 0)
         results["summary"]["total_size_gb"] += r["stats"].get("total_size_gb", 0)
     return results
 
 
-def _print_report(
+def print_report(
     results: dict, verbose: bool = False, title: str = "FineWeb-Edu 重组验证报告"
 ) -> None:
     print(f"\n{'=' * 60}\n{title}\n{'=' * 60}")
 
     for name, r in results["buckets"].items():
-        print(
-            f"\n桶 {name}:\n  状态: {'✅ 通过' if r['valid'] else '❌ 失败'}\n  文件数: {r['file_count']}"
-        )
+        status_icon = "✅ 通过" if r["valid"] else "❌ 失败"
+        print(f"\n桶 {name}:\n  状态: {status_icon}\n  文件数: {r['file_count']}")
         s = r.get("stats", {})
         print(
-            f"  记录数: {s.get('record_count', 0):,}\n  总大小: {s.get('total_size_gb', 0):.2f} GB"
+            f"  记录数: {s.get('record_count', 0):,}\n"
+            f"  总大小: {s.get('total_size_gb', 0):.2f} GB"
         )
         if verbose and r["errors"]:
             print("  错误详情:")
@@ -139,44 +139,71 @@ def _print_report(
                 print(f"    ... 还有 {len(r['errors']) - 10} 个错误")
 
     print(
-        f"\n{'-' * 60}\n总计:\n  文件数: {results['summary']['total_files']}\n  记录数: {results['summary']['total_records']:,}"
+        f"\n{'-' * 60}\n总计:\n"
+        f"  文件数: {results['summary']['total_files']}\n"
+        f"  记录数: {results['summary']['total_records']:,}"
     )
     print(
-        f"  总大小: {results['summary']['total_size_gb']:.2f} GB\n  错误数: {results['summary']['total_errors']}"
+        f"  总大小: {results['summary']['total_size_gb']:.2f} GB\n"
+        f"  错误数: {results['summary']['total_errors']}"
     )
     print(f"\n{'✅ 验证通过' if results['valid'] else '❌ 验证失败'}\n{'=' * 60}")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="验证 FineWeb-Edu 重组结果",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""示例:
-  python scripts/validate_output.py --input data/datasets/fineweb/en
-  python scripts/validate_output.py --input data/datasets/fineweb/en --bucket 3.0
-  python scripts/validate_output.py --input data/datasets/fineweb/en --verbose""",
-    )
-    parser.add_argument("--input", type=Path, required=True, help="输入目录")
-    parser.add_argument(
-        "--bucket", type=str, choices=get_bucket_names(), help="只验证指定桶"
-    )
-    parser.add_argument("--verbose", action="store_true", help="显示详细错误信息")
-    parser.add_argument("--json", type=Path, help="将结果保存为 JSON 文件")
-
-    args = parser.parse_args()
-    if not args.input.exists():
-        print(f"错误：输入目录不存在：{args.input}", file=sys.stderr)
+def validate(
+    input_dir: Path,
+    dataset_key: str,
+    verbose: bool = False,
+    json_output: Path | None = None,
+) -> int:
+    if not input_dir.exists():
+        print(f"错误：输入目录不存在：{input_dir}", file=sys.stderr)
         return 1
 
-    results = _validate_all(args.input, args.bucket)
-    _print_report(results, verbose=args.verbose)
+    results = validate_all_buckets(input_dir, dataset_key)
+    print_report(
+        results, verbose=verbose, title=f"FineWeb-Edu 验证报告 [{dataset_key}]"
+    )
 
-    if args.json:
-        with open(args.json, "w", encoding="utf-8") as f:
+    if json_output:
+        with open(json_output, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"\n结果已保存到: {args.json}")
+        print(f"\n结果已保存到: {json_output}")
 
     return 0 if results["valid"] else 1
+
+
+def validate_all(verbose: bool = False, json_output: Path | None = None) -> int:
+    dataset_configs = get_dataset_configs()
+    overall_valid = True
+    all_results = {}
+
+    for dataset_key, dataset_config in dataset_configs.items():
+        input_dir = Path(dataset_config.get("output_dir", ""))
+        print(f"\n{'=' * 60}")
+        print(f"验证数据集: {dataset_key}")
+        print(f"{'=' * 60}")
+
+        if not input_dir.exists():
+            print(f"警告：输出目录不存在，跳过 {dataset_key}: {input_dir}")
+            continue
+
+        result = validate_all_buckets(input_dir, dataset_key)
+        all_results[dataset_key] = result
+        overall_valid &= result["valid"]
+
+        print_report(result, verbose=verbose, title=f"验证报告 [{dataset_key}]")
+
+    if json_output:
+        with open(json_output, "w", encoding="utf-8") as f:
+            json.dump(all_results, f, indent=2, ensure_ascii=False)
+        print(f"\n所有结果已保存到: {json_output}")
+
+    return 0 if overall_valid else 1
+
+
+def main() -> int:
+    return validate_all()
 
 
 if __name__ == "__main__":
