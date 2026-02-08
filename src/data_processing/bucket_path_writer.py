@@ -30,7 +30,9 @@ class BucketPathWriter(PipelineStep):
 
     @staticmethod
     def _estimate_row_size(text: str, doc_id: str) -> int:
-        return len(text) * 2 + len(doc_id) * 2 + 32
+        text_bytes = len(text.encode("utf-8"))
+        id_bytes = len(doc_id.encode("utf-8"))
+        return text_bytes + id_bytes + 32
 
     def _flush_bucket(self, name: str) -> None:
         state = self._states[name]
