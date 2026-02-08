@@ -1,6 +1,6 @@
-# FineWeb-Edu 数据集质量评分分桶重组
+# FineWeb-Edu数据集质量评分分桶重组
 
-> **目标数据集**: HuggingFaceFW/fineweb-edu (score≥2 版本)  
+> **目标数据集**: HuggingFaceFW/fineweb-edu
 > **输出目录**: `data/datasets/fineweb/en/`
 
 ## 设计目标
@@ -168,26 +168,26 @@ python scripts/validate_output.py --input data/datasets/fineweb/en --json report
 ```
 nanomind/
 ├── src/data_processing/
-│   ├── __init__.py              # 模块导出
-│   ├── adapters.py              # 数据适配器（fineweb_adapter）
-│   ├── bucket_config.py         # 评分桶配置（BucketConfig）
-│   ├── bucket_path_writer.py    # Parquet 写入器（多桶支持）
-│   ├── config_loader.py         # YAML 配置加载器
-│   ├── fineweb_reorganizer.py   # CLI 主入口（多桶处理器）
-│   └── score_filter.py          # 评分过滤器和采样
+│   ├── __init__.py                 # 模块导出
+│   ├── adapters.py                 # 数据适配器（fineweb_adapter）
+│   ├── bucket_config.py            # 评分桶配置（BucketConfig）
+│   ├── bucket_path_writer.py       # Parquet 写入器（多桶支持）
+│   ├── config_loader.py            # YAML 配置加载器
+│   ├── fineweb_reorganizer.py      # CLI 主入口（多桶处理器）
+│   └── score_filter.py             # 评分过滤器和采样
 ├── scripts/
-│   ├── trial_run.py             # 试运行脚本
-│   └── validate_output.py       # 输出验证脚本
+│   ├── trial_run.py                # 试运行脚本
+│   └── validate_output.py          # 输出验证脚本
 ├── config/
-│   ├── buckets.yaml             # 评分桶配置
-│   ├── dataset.yaml             # 数据集字段配置
-│   ├── paths.yaml               # 路径配置
-│   └── processing.yaml          # 处理参数配置
+│   ├── buckets.yaml                # 评分桶配置
+│   ├── dataset.yaml                # 数据集字段配置
+│   ├── paths.yaml                  # 路径配置
+│   └── processing.yaml             # 处理参数配置
 ├── tests/
-│   ├── test_adapters.py         # 适配器测试
-│   ├── test_bucket_config.py    # 评分桶配置测试
+│   ├── test_adapters.py            # 适配器测试
+│   ├── test_bucket_config.py       # 评分桶配置测试
 │   ├── test_bucket_path_writer.py  # 桶写入器测试
-│   └── test_score_filter.py     # 评分过滤器测试
+│   └── test_score_filter.py        # 评分过滤器测试
 └── docs/
     ├── fineweb_edu_data_reorganization_design.md  # 本文档
     └── fineweb-edu-chinese-score-analysis.md      # 中文数据集评分分析
