@@ -2,13 +2,13 @@ import hashlib
 
 from datatrove.pipeline.base import PipelineStep
 
-from .bucket_config import BucketConfig
+from .bucket_config import BucketConfig, find_bucket_for_score
 
 
 class ScoreFilter(PipelineStep):
-    def __init__(self, bucket: BucketConfig, random_seed: int = 42):
+    def __init__(self, buckets: list[BucketConfig], random_seed: int = 42):
         super().__init__()
-        self.bucket = bucket
+        self._buckets = {b.name: b for b in buckets}
         self.random_seed = random_seed
 
     def _should_sample(self, doc_id: str, rate: float) -> bool:
@@ -21,19 +21,20 @@ class ScoreFilter(PipelineStep):
     def run(self, data, rank: int = 0, world_size: int = 1):
         for doc in data:
             score = doc.metadata.get("score")
-
             if score is None:
                 self.stat_update("missing_score", value=1)
                 continue
-            if not isinstance(score, (int, float)):
-                self.stat_update("invalid_score", value=1)
-                continue
-            if not self.bucket.contains(float(score)):
+
+            score = float(score)
+            bucket = find_bucket_for_score(score)
+            if bucket is None or bucket.name not in self._buckets:
                 self.stat_update("filtered_out", value=1)
                 continue
 
-            if self._should_sample(doc.id, self.bucket.sampling_rate):
-                self.stat_update("kept", value=1)
+            actual_bucket = self._buckets[bucket.name]
+            if self._should_sample(doc.id, actual_bucket.sampling_rate):
+                doc.metadata["__target_bucket"] = bucket.name
+                self.stat_update(f"kept_{bucket.name}", value=1)
                 yield doc
             else:
-                self.stat_update("sampled_out", value=1)
+                self.stat_update(f"sampled_out_{bucket.name}", value=1)

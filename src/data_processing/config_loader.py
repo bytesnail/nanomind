@@ -1,6 +1,5 @@
-"""FineWeb-Edu 配置加载器。"""
-
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -8,22 +7,16 @@ import yaml
 
 
 class Config:
-    """配置管理器，支持从 YAML 文件加载和环境变量覆盖。"""
-
     def __init__(self, config_dir: Path | None = None):
-        if config_dir is None:
-            config_dir = Path(__file__).parent.parent.parent / "config"
-        self.config_dir = config_dir
-        self._cache: dict[str, Any] = {}
+        self.config_dir = config_dir or Path(__file__).parent.parent.parent / "config"
 
+    @lru_cache(maxsize=10)
     def _load(self, name: str) -> dict[str, Any]:
-        if name not in self._cache:
-            path = self.config_dir / f"{name}.yaml"
-            if not path.exists():
-                raise FileNotFoundError(f"配置文件不存在: {path}")
-            with open(path, encoding="utf-8") as f:
-                self._cache[name] = yaml.safe_load(f) or {}
-        return self._cache[name]
+        path = self.config_dir / f"{name}.yaml"
+        if not path.exists():
+            raise FileNotFoundError(f"配置文件不存在: {path}")
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
 
     @property
     def buckets(self) -> dict[str, Any]:
@@ -35,10 +28,9 @@ class Config:
 
     @property
     def paths(self) -> dict[str, Any]:
-        paths = self._load("paths").copy()
-        for key in list(paths.keys()):
-            env_key = f"FINEWEB_{key.upper()}"
-            if env_var := os.getenv(env_key):
+        paths = dict(self._load("paths"))
+        for key in paths:
+            if env_var := os.getenv(f"FINEWEB_{key.upper()}"):
                 paths[key] = env_var
         return paths
 
@@ -49,26 +41,7 @@ class Config:
     def get_bucket_configs(self) -> list[dict[str, Any]]:
         return self.buckets.get("buckets", [])
 
-    def get_epsilon(self) -> float:
-        return float(self.buckets.get("epsilon", 1e-6))
 
-    def _get_fineweb_config(self) -> dict[str, Any]:
-        return self.dataset.get("fineweb_edu", {})
-
-    def get_required_fields(self) -> set[str]:
-        return set(
-            self._get_fineweb_config().get("required_fields", ["id", "text", "score"])
-        )
-
-    def get_root_marker(self) -> str:
-        return self._get_fineweb_config().get("root_marker", "fineweb-edu")
-
-
-_config_instance: Config | None = None
-
-
+@lru_cache(maxsize=1)
 def get_config() -> Config:
-    global _config_instance
-    if _config_instance is None:
-        _config_instance = Config()
-    return _config_instance
+    return Config()

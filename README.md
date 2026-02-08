@@ -29,7 +29,9 @@ uv pip install -r requirements.txt
 
 ## FineWeb-Edu 数据重组
 
-项目实现 FineWeb-Edu 数据集按质量评分分桶重组，支持分层采样。详见设计文档：
+项目实现 FineWeb-Edu 数据集按质量评分分桶重组，支持分层采样。**优化实现**：一次读取输入数据集，同时处理所有评分桶，避免重复 I/O。
+
+详见设计文档：
 
 - [`docs/fineweb_edu_data_reorganization_design.md`](./docs/fineweb_edu_data_reorganization_design.md) - 完整设计文档
 - [`docs/fineweb-edu-chinese-score-analysis.md`](./docs/fineweb-edu-chinese-score-analysis.md) - 中文数据集评分分析
@@ -37,12 +39,17 @@ uv pip install -r requirements.txt
 ### 快速开始
 
 ```bash
-# 处理所有评分桶
+# 处理所有评分桶（自动使用一次读取多桶模式）
 python -m src.data_processing.fineweb_reorganizer
 
 # 验证输出
 python scripts/validate_output.py --input data/datasets/fineweb/en
 ```
+
+### 性能优化
+
+- **多桶模式**（默认）：处理多个桶时，输入数据只读取一次，大幅提升性能
+- **单桶模式**：处理单个桶时使用传统模式
 
 ### 评分桶配置
 
@@ -65,14 +72,11 @@ python -m src.data_processing.fineweb_reorganizer --workers 16 --seed 42
 # 单独指定 tasks 数量（控制 Datatrove pipeline 并行度）
 python -m src.data_processing.fineweb_reorganizer --workers 8 --tasks 16
 
-# 并行处理多个桶
-python -m src.data_processing.fineweb_reorganizer --parallel-buckets 4
-
 # 试运行（创建小规模测试数据）
 python scripts/trial_run.py
 
-# 批量运行（生产环境推荐）
-bash scripts/run_processing.sh --workers 16 --parallel-buckets 2
+# 生产环境运行（使用 time 统计耗时）
+time python -m src.data_processing.fineweb_reorganizer --workers 16
 ```
 
 ## 项目结构

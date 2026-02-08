@@ -1,16 +1,5 @@
-# FineWeb-Edu 路径配置
-# 支持环境变量覆盖，格式: FINEWEB_{KEY_NAME}
-# 例如: export FINEWEB_INPUT_DIR="/custom/path"
-
-# 输入数据源目录
 input_dir: "data/datasets/HuggingFaceFW/fineweb-edu"
-
-# 输出目录
 output_dir: "data/datasets/fineweb/en"
-
-# 日志目录
 log_dir: "logs/fineweb_processing"
-
-# 试运行专用路径
 trial_input_dir: "data/datasets/test_fineweb_input"
 trial_output_dir: "data/datasets/test_fineweb_output"

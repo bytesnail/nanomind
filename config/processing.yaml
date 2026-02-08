@@ -1,28 +1,14 @@
-# FineWeb-Edu 数据处理参数配置
-
-# 并行处理配置
 workers: 30
-
-# Datatrove pipeline 任务数
 tasks: 1000
-
-# 随机种子（用于可复现的采样）
 random_seed: 42
-
-# 输出文件压缩格式
-# 可选值: zstd, gzip, snappy, brotli, lz4
 compression: "zstd"
+max_file_size_bytes: 536870912
 
-# 单个输出文件最大大小（字节）
-max_file_size_bytes: 536870912  # 512MB
-
-# 日志配置
 logging:
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   level: "INFO"
 
-# 试运行专用配置（trial_run.py 使用）
 trial:
   max_files: 5
   max_rows: 2000
-  max_file_size_bytes: 134217728  # 128MB（试运行使用较小文件）
+  max_file_size_bytes: 134217728

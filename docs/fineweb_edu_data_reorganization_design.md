@@ -20,13 +20,13 @@
 ```
 data/datasets/fineweb/en/
 ├── 2.8/
-│   └── {rank}.parquet
+│   └── {rank}_{counter}.parquet
 ├── 3.0/
-│   └── {rank}.parquet
+│   └── {rank}_{counter}.parquet
 ├── 3.5/
-│   └── {rank}.parquet
+│   └── {rank}_{counter}.parquet
 └── 4.0/
-    └── {rank}.parquet
+    └── {rank}_{counter}.parquet
 ```
 
 ## 核心组件
@@ -43,7 +43,6 @@ class BucketConfig:
 ```
 
 - 区间采用**左闭右开**（最后桶无上界）
-- 支持浮点精度容差（`epsilon = 1e-6`）
 - 配置从 `config/buckets.yaml` 加载
 
 ### 2. 评分过滤器 (`score_filter.py`)
@@ -57,21 +56,22 @@ class BucketConfig:
   h = int.from_bytes(hashlib.md5(data).digest()[:8], "big")
   return h / (2**64) < rate
   ```
-- **统计追踪**: 记录 `missing_score`, `invalid_score`, `filtered_out`, `kept`, `sampled_out`
+- **统计追踪**: 记录 `missing_score`, `filtered_out`, `kept_{bucket}`, `sampled_out_{bucket}`
 
 ### 3. 数据适配器 (`adapters.py`)
 
 - **ID 生成**: `{相对路径}#{索引}`，相对路径从 `fineweb-edu` 后开始
 - **字段提取**: `text`, `score`, `dump` → `text`, `id`, `score`, `cc_main`
-- **数据验证**: 空文本返回 `None` 或抛出异常（`raise_on_error=True`）
+- **数据验证**: 空文本返回 `None`
 
 ### 4. 桶路径写入器 (`bucket_path_writer.py`)
 
-继承 Datatrove ParquetWriter：
+继承 Datatrove PipelineStep：
 
-- 输出文件名: `{rank:05d}.parquet`
+- 输出文件名: `{rank:05d}_{counter:05d}.parquet`
 - 支持压缩格式: `zstd`, `gzip`, `snappy`, `brotli`, `lz4`
 - 默认文件大小限制: 512MB
+- 多桶并行写入支持
 
 ### 5. 配置加载器 (`config_loader.py`)
 
@@ -79,10 +79,34 @@ class BucketConfig:
 
 | 文件 | 内容 |
 |------|------|
-| `buckets.yaml` | 评分桶定义、epsilon |
+| `buckets.yaml` | 评分桶定义 |
 | `processing.yaml` | workers、tasks、random_seed、compression、max_file_size_bytes |
 | `paths.yaml` | input_dir、output_dir，支持 `FINEWEB_{KEY}` 环境变量覆盖 |
 | `dataset.yaml` | 数据集字段配置、root_marker |
+
+### 6. 主处理器 (`fineweb_reorganizer.py`)
+
+CLI 入口，实现**一次读取，多桶并行处理**的高效模式：
+
+```python
+# 处理流程：Reader -> ScoreFilter -> BucketPathWriter
+pipeline = [
+    ParquetReader(str(input_dir), adapter=fineweb_adapter, glob_pattern="**/*.parquet"),
+    ScoreFilter(buckets=buckets, random_seed=seed),
+    BucketPathWriter(
+        output_dir=str(output_dir),
+        buckets=buckets,
+        compression=compression,
+        max_file_size=max_size,
+    ),
+]
+```
+
+**性能优化**:
+- **单次读取**: 输入数据集只被读取一次，避免重复 I/O
+- **并行分发**: 根据评分将文档路由到对应桶，同时应用各桶的采样率
+- **内存缓冲**: 每个桶独立缓冲，达到文件大小限制时批量写入
+- **统计追踪**: 按桶统计 `kept_{bucket}`, `sampled_out_{bucket}`, `written_{bucket}`
 
 ## 使用方法
 
@@ -101,17 +125,19 @@ python -m src.data_processing.fineweb_reorganizer --workers 16 --seed 42
 # 单独指定 tasks 数量（控制 Datatrove pipeline 并行度）
 python -m src.data_processing.fineweb_reorganizer --workers 8 --tasks 16
 
-# 并行处理多个桶
-python -m src.data_processing.fineweb_reorganizer --parallel-buckets 4
-
 # 指定压缩格式和文件大小
 python -m src.data_processing.fineweb_reorganizer --compression zstd --max-file-size 536870912
 ```
 
-### 批量运行（生产环境）
+### 生产环境运行
 
 ```bash
-bash scripts/run_processing.sh --workers 16 --parallel-buckets 2
+# 使用 time 命令统计运行时间
+time python -m src.data_processing.fineweb_reorganizer --workers 16
+
+# 处理完成后自动验证
+python -m src.data_processing.fineweb_reorganizer --workers 16 && \
+  python scripts/validate_output.py --input data/datasets/fineweb/en
 ```
 
 ### 试运行
@@ -145,12 +171,11 @@ nanomind/
 │   ├── __init__.py              # 模块导出
 │   ├── adapters.py              # 数据适配器（fineweb_adapter）
 │   ├── bucket_config.py         # 评分桶配置（BucketConfig）
-│   ├── bucket_path_writer.py    # Parquet 写入器
+│   ├── bucket_path_writer.py    # Parquet 写入器（多桶支持）
 │   ├── config_loader.py         # YAML 配置加载器
-│   ├── fineweb_reorganizer.py   # CLI 主入口
+│   ├── fineweb_reorganizer.py   # CLI 主入口（多桶处理器）
 │   └── score_filter.py          # 评分过滤器和采样
 ├── scripts/
-│   ├── run_processing.sh        # 生产环境批量运行脚本
 │   ├── trial_run.py             # 试运行脚本
 │   └── validate_output.py       # 输出验证脚本
 ├── config/
@@ -161,6 +186,7 @@ nanomind/
 ├── tests/
 │   ├── test_adapters.py         # 适配器测试
 │   ├── test_bucket_config.py    # 评分桶配置测试
+│   ├── test_bucket_path_writer.py  # 桶写入器测试
 │   └── test_score_filter.py     # 评分过滤器测试
 └── docs/
     ├── fineweb_edu_data_reorganization_design.md  # 本文档

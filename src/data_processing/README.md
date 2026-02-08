@@ -9,9 +9,22 @@
 | `adapters.py` | 数据适配器（字段筛选、ID 生成） |
 | `bucket_config.py` | 评分桶配置（区间定义、采样率） |
 | `score_filter.py` | 评分过滤器（区间过滤、确定性采样） |
-| `bucket_path_writer.py` | Parquet 写入器（输出到桶目录） |
+| `bucket_path_writer.py` | Parquet 写入器（支持多桶并行写入） |
 | `config_loader.py` | YAML 配置加载器（支持环境变量覆盖） |
-| `fineweb_reorganizer.py` | CLI 主入口 |
+| `fineweb_reorganizer.py` | CLI 主入口（一次读取，多桶处理） |
+
+## 处理流程
+
+```
+ParquetReader → ScoreFilter → BucketPathWriter
+     ↓                ↓                ↓
+ 读取数据         评分过滤+采样      分桶写入
+```
+
+**性能优化**:
+- **单次读取**: 输入数据集只被读取一次，避免重复 I/O
+- **多桶并行**: 一次处理所有评分桶，大幅提升性能
+- **确定性采样**: 使用 MD5 哈希确保采样结果可复现
 
 ## 评分桶配置
 
