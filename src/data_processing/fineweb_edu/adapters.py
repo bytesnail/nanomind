@@ -1,6 +1,6 @@
 from typing import Any
 
-from .config_loader import get_dataset_configs
+from ..config_loader import get_dataset_configs
 
 
 def _generate_id(source_path: str, idx: int, root_marker: str) -> str:

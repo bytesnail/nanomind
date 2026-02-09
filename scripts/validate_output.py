@@ -33,12 +33,11 @@ def validate_file(path: Path, bucket_name: str, dataset_key: str) -> list[str]:
 
         if "score" in cols:
             scores = table.column("score").to_pylist()
-            bad = sum(
-                1
-                for s in scores
-                if (b := find_bucket_for_score(s, dataset_key)) is None
-                or b.name != bucket_name
-            )
+            bad = 0
+            for s in scores:
+                b = find_bucket_for_score(s, dataset_key)
+                if b is None or b.name != bucket_name:
+                    bad += 1
             if bad:
                 bucket = get_all_bucket_configs(dataset_key)
                 target = next((b for b in bucket if b.name == bucket_name), None)

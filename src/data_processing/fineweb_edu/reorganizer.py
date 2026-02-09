@@ -6,10 +6,9 @@ from pathlib import Path
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.readers import ParquetReader
 
-from .adapters import fineweb_adapter
-from .bucket_config import BucketConfig, get_all_bucket_configs
-from .bucket_path_writer import BucketPathWriter
-from .config_loader import (
+from ..bucket_config import BucketConfig, get_all_bucket_configs
+from ..bucket_path_writer import BucketPathWriter
+from ..config_loader import (
     DEFAULT_COMPRESSION,
     DEFAULT_LOG_FORMAT,
     DEFAULT_MAX_FILE_SIZE,
@@ -20,8 +19,9 @@ from .config_loader import (
     get_dataset_configs,
     get_processing_config,
 )
-from .parquet_merger import merge_all_buckets
-from .score_filter import ScoreFilter
+from ..parquet_merger import merge_all_buckets
+from ..score_filter import ScoreFilter
+from .adapters import fineweb_adapter
 
 __all__ = [
     "create_pipeline",
@@ -141,11 +141,11 @@ def process_all_datasets(
     max_size: int = 0,
 ) -> dict[str, list[str]]:
     defaults = get_default_config()
-    workers = workers if workers > 0 else defaults["workers"]
-    tasks = tasks if tasks > 0 else defaults["tasks"]
-    random_seed = random_seed if random_seed != 0 else defaults["random_seed"]
-    compression = compression if compression else defaults["compression"]
-    max_size = max_size if max_size > 0 else defaults["max_size"]
+    workers = workers or defaults["workers"]
+    tasks = tasks or defaults["tasks"]
+    random_seed = random_seed or defaults["random_seed"]
+    compression = compression or defaults["compression"]
+    max_size = max_size or defaults["max_size"]
 
     dataset_configs = get_dataset_configs()
 

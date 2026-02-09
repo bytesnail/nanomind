@@ -1,10 +1,10 @@
-"""Tests for fineweb_reorganizer module."""
+"""Tests for fineweb_edu.reorganizer module."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.data_processing.bucket_config import BucketConfig
-from src.data_processing.fineweb_reorganizer import (
+from src.data_processing.fineweb_edu import (
     create_pipeline,
     get_default_config,
     main,
@@ -15,7 +15,7 @@ from src.data_processing.fineweb_reorganizer import (
 
 
 class TestDefaults:
-    @patch("src.data_processing.fineweb_reorganizer.get_processing_config")
+    @patch("src.data_processing.fineweb_edu.reorganizer.get_processing_config")
     def test_defaults_loading(self, mock_get_processing_config):
         mock_get_processing_config.return_value = {
             "workers": 16,
@@ -37,7 +37,7 @@ class TestDefaults:
         assert result["max_size"] == 1024
         assert result["log_format"] == "%(levelname)s - %(message)s"
 
-    @patch("src.data_processing.fineweb_reorganizer.get_processing_config")
+    @patch("src.data_processing.fineweb_edu.reorganizer.get_processing_config")
     def test_defaults_with_defaults(self, mock_get_processing_config):
         mock_get_processing_config.return_value = {}
 
@@ -72,10 +72,10 @@ class TestSetupLogging:
 
 
 class TestCreatePipeline:
-    @patch("src.data_processing.fineweb_reorganizer.LocalPipelineExecutor")
-    @patch("src.data_processing.fineweb_reorganizer.ParquetReader")
-    @patch("src.data_processing.fineweb_reorganizer.ScoreFilter")
-    @patch("src.data_processing.fineweb_reorganizer.BucketPathWriter")
+    @patch("src.data_processing.fineweb_edu.reorganizer.LocalPipelineExecutor")
+    @patch("src.data_processing.fineweb_edu.reorganizer.ParquetReader")
+    @patch("src.data_processing.fineweb_edu.reorganizer.ScoreFilter")
+    @patch("src.data_processing.fineweb_edu.reorganizer.BucketPathWriter")
     def test_create_pipeline_multi_bucket(
         self, mock_writer, mock_filter, mock_reader, mock_executor
     ):
@@ -99,8 +99,8 @@ class TestCreatePipeline:
 
 
 class TestProcessSingleDataset:
-    @patch("src.data_processing.fineweb_reorganizer.create_pipeline")
-    @patch("src.data_processing.fineweb_reorganizer.setup_logging")
+    @patch("src.data_processing.fineweb_edu.reorganizer.create_pipeline")
+    @patch("src.data_processing.fineweb_edu.reorganizer.setup_logging")
     def test_process_single_dataset(
         self, mock_setup_logging, mock_create_pipeline, tmp_path
     ):
@@ -130,9 +130,9 @@ class TestProcessSingleDataset:
 
 
 class TestProcessAllDatasets:
-    @patch("src.data_processing.fineweb_reorganizer.process_single_dataset")
-    @patch("src.data_processing.fineweb_reorganizer.get_all_bucket_configs")
-    @patch("src.data_processing.fineweb_reorganizer.get_dataset_configs")
+    @patch("src.data_processing.fineweb_edu.reorganizer.process_single_dataset")
+    @patch("src.data_processing.fineweb_edu.reorganizer.get_all_bucket_configs")
+    @patch("src.data_processing.fineweb_edu.reorganizer.get_dataset_configs")
     def test_process_all_datasets(
         self, mock_get_dataset_configs, mock_get_buckets, mock_process_single
     ):
@@ -153,7 +153,7 @@ class TestProcessAllDatasets:
         assert "en" in results
         assert results["en"] == ["3.0"]
 
-    @patch("src.data_processing.fineweb_reorganizer.get_dataset_configs")
+    @patch("src.data_processing.fineweb_edu.reorganizer.get_dataset_configs")
     def test_process_all_datasets_skips_missing_input(
         self, mock_get_dataset_configs, tmp_path
     ):
@@ -170,7 +170,7 @@ class TestProcessAllDatasets:
 
 
 class TestMain:
-    @patch("src.data_processing.fineweb_reorganizer.process_all_datasets")
+    @patch("src.data_processing.fineweb_edu.reorganizer.process_all_datasets")
     def test_main_success(self, mock_process_all):
         mock_process_all.return_value = {"en": ["3.0", "3.5"], "zh": ["2.0", "3.0"]}
 
@@ -179,7 +179,7 @@ class TestMain:
         assert result == 0
         mock_process_all.assert_called_once()
 
-    @patch("src.data_processing.fineweb_reorganizer.process_all_datasets")
+    @patch("src.data_processing.fineweb_edu.reorganizer.process_all_datasets")
     def test_main_failure(self, mock_process_all):
         mock_process_all.side_effect = Exception("Test error")
 

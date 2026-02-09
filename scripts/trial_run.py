@@ -18,7 +18,7 @@ from src.data_processing.config_loader import (
     get_paths_config,
     get_processing_config,
 )
-from src.data_processing.fineweb_reorganizer import process_single_dataset
+from src.data_processing.fineweb_edu import normalize_score, process_single_dataset
 
 _processing_cfg = get_processing_config()
 _paths_cfg = get_paths_config()
@@ -53,11 +53,7 @@ def _create_test_dataset(
             if "score" in table.column_names:
                 norm_config = dataset_config.get("score_normalization")
                 for raw_score in table.column("score").to_pylist():
-                    score = (
-                        raw_score * norm_config.get("multiplier", 1.0)
-                        if norm_config and norm_config.get("enabled")
-                        else raw_score
-                    )
+                    score = normalize_score(raw_score, norm_config)
                     b = find_bucket_for_score(score, dataset_key)
                     name = b.name if b else "below_range"
                     stats["score_distribution"][name] = (
@@ -98,8 +94,6 @@ def _run_processing(
     # 清理 datatrove 日志目录以避免缓存问题
     log_dir = output_dir.parent / "logs"
     if log_dir.exists():
-        import shutil
-
         shutil.rmtree(log_dir)
 
     logger.info(

@@ -1,6 +1,6 @@
 import pytest
 
-from src.data_processing.adapters import fineweb_adapter, normalize_score
+from src.data_processing.fineweb_edu import fineweb_adapter, normalize_score
 
 
 @pytest.fixture

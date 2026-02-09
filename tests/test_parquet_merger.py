@@ -2,7 +2,6 @@
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 
 from src.data_processing.parquet_merger import merge_all_buckets, merge_bucket_files
 
