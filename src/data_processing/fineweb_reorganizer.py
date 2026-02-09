@@ -70,7 +70,8 @@ def create_pipeline(
     compression: Compression = DEFAULT_COMPRESSION,
     max_size: int = DEFAULT_MAX_FILE_SIZE,
 ) -> LocalPipelineExecutor:
-    log_name = "multi_bucket" if len(buckets) > 1 else buckets[0].name
+    # 使用 output_dir 的名称（语言代码）来区分不同数据集的日志目录
+    log_name = f"multi_bucket_{output_dir.name}"
     return LocalPipelineExecutor(
         pipeline=[
             ParquetReader(
