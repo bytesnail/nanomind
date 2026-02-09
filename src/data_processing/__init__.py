@@ -2,6 +2,7 @@ from .adapters import fineweb_adapter, normalize_score
 from .bucket_config import BucketConfig, find_bucket_for_score, get_all_bucket_configs
 from .bucket_path_writer import BucketPathWriter
 from .config_loader import Compression
+from .parquet_merger import merge_all_buckets, merge_bucket_files
 from .score_filter import ScoreFilter
 
 __all__ = [
@@ -12,5 +13,7 @@ __all__ = [
     "find_bucket_for_score",
     "fineweb_adapter",
     "get_all_bucket_configs",
+    "merge_all_buckets",
+    "merge_bucket_files",
     "normalize_score",
 ]
