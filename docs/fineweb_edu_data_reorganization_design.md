@@ -1,6 +1,6 @@
 # FineWeb-Edu 数据集质量评分分桶重组系统设计文档
 
-> **版本**: 1.1  
+> **版本**: 1.3  
 > **最后更新**: 2025年2月  
 > **目标数据集**: HuggingFaceFW/fineweb-edu (英文), opencsg/Fineweb-Edu-Chinese-V2.1 (中文)
 
@@ -55,9 +55,9 @@
 | 3.5 ≤ score < 4.0 | 3.5 | 90% | 0.70-0.80 |
 | score ≥ 4.0 | 4.0 | 100% | ≥ 0.80 |
 
-**转换公式**: `original_score = normalized_score × 5`
+**转换公式**: `score = normalized_score × 5`
 
-> **注意**: 中文数据集经过预过滤，仅保留原始评分 ≥ 2.5 的样本，因此实际最高评分约 4.70 分（归一化值 0.94）。
+> **注意**: 中文数据集经过预过滤，仅保留归一化评分 ≥ 0.50（转换后评分 ≥ 2.5）的样本，因此实际最高评分约 4.70 分（归一化值 0.94）。
 
 ---
 
@@ -105,13 +105,26 @@
 └──────────────┘     └──────────────┘     └──────────────┘
        │                    │                    │
        ▼                    ▼                    ▼
-  - 字段筛选           - 区间匹配           - 多桶并行
-  - ID 生成            - 确定性采样          - 自动分片
-  - 评分归一化          - 统计追踪            - 压缩输出
+   - 字段筛选           - 区间匹配           - 多桶并行
+   - ID 生成            - 确定性采样          - 自动分片
+   - 评分归一化          - 统计追踪            - 压缩输出
        │                    │                    │
        ▼                    ▼                    ▼
-   提取 text,           匹配评分桶           按桶写入
-   score, dump          应用采样率           Parquet
+    提取 text,           匹配评分桶           按桶写入
+    score, dump          应用采样率           Parquet
+                                                    │
+                                                    ▼
+                                          ┌─────────────────┐
+                                          │  ParquetMerger  │
+                                          │  合并小文件     │
+                                          └─────────────────┘
+                                                    │
+                                                    ▼
+                                              - 按大小合并
+                                              - 删除源文件
+                                                    │
+                                                    ▼
+                                           {00000,00001,...}.parquet
 ```
 
 ### 2.3 输出目录结构
@@ -139,32 +152,43 @@ data/datasets/fineweb/
 
 ### 3.1 数据适配器 (`fineweb_edu/adapters.py`)
 
-**职责**: 将原始数据转换为统一格式。
+**职责**: 将原始数据转换为统一格式，供 Pipeline 处理。
 
 **处理流程**:
-1. **字段筛选**: 提取 `text`, `score`, `dump`
-2. **ID 生成**: 创建唯一文档标识符 `{相对路径}#{索引}`
-3. **评分归一化**: 根据数据集配置自动转换评分
+1. **字段筛选**: 提取 `text`, `score`, `dump`（原始字段）
+2. **ID 生成**: 创建唯一文档标识符 `{source}#{索引}`，其中 `source` 为相对路径
+3. **评分归一化**: 根据数据集配置自动转换评分（中文数据集 ×5）
+
+**输出格式**:
+```python
+{
+    "text": str,           # 文档内容
+    "id": str,             # 唯一标识符，格式: "{相对路径}#{索引}"
+    "metadata": {
+        "score": float,    # 归一化后的质量评分
+        "cc_main": str,    # Common Crawl 源标识（来自 dump 字段）
+    }
+}
+```
 
 **ID 生成规则**:
-```python
-{相对路径}#{索引}
-
-# 示例
-"data/datasets/HuggingFaceFW/fineweb-edu/data/CC-MAIN-2024-10/train.parquet#42"
-      ↓ 提取相对路径（从 root_marker 开始后）
-"data/CC-MAIN-2024-10/train.parquet#42"
-```
+- `source`: Datatrove 传入的源文件路径（相对于输入目录）
+- `idx`: 文档在源文件中的索引
+- **用途**: 确定性采样和结果追踪
 
 **数据集自动识别**:
 ```python
-def _get_dataset_config_for_source(source: str) -> dict:
-    """根据文件路径自动识别数据集类型"""
-    for lang, config in datasets.items():
-        marker = config.get("root_marker", "")
-        if marker and marker in source:
+def _get_dataset_config_for_source(reader: Any | None = None) -> dict[str, Any]:
+    """根据数据读取器自动识别数据集类型"""
+    all_configs = get_dataset_configs()
+    data_folder_path = str(reader.data_folder.path)
+    
+    for config in all_configs.values():
+        input_dir = config.get("input_dir", "")
+        if input_dir and input_dir in data_folder_path:
             return config
-    return datasets.get("en", {})  # 默认英文配置
+    
+    return {}
 ```
 
 ### 3.2 评分过滤器 (`score_filter.py`)
@@ -203,9 +227,10 @@ def _should_sample(self, doc_id: str, rate: float) -> bool:
     if rate >= 1.0:
         return True
     data = f"{self.random_seed}_{doc_id}".encode()
-    hash_bytes = hashlib.md5(data, usedforsecurity=False).digest()[:8]
-    hash_int = int.from_bytes(hash_bytes, "big")
-    return hash_int / (2**64) < rate
+    h = int.from_bytes(
+        hashlib.md5(data, usedforsecurity=False).digest()[:8], "big"
+    )
+    return h / (2**64) < rate
 ```
 
 **3. 统计追踪**
@@ -251,8 +276,14 @@ if state["size"] + row_size > max_file_size and state["buffer"]:
 class BucketConfig:
     name: str              # 桶名称（如 "3.0"）
     min_score: float       # 最小评分（包含）
-    max_score: float       # 最大评分（不包含），None 表示无上界
+    max_score: float | None  # 最大评分（不包含），None 表示无上界
     sampling_rate: float   # 采样率 0.0-1.0
+
+    def contains(self, score: float) -> bool:
+        """检查评分是否在当前桶的区间内（左闭右开）"""
+        if score < self.min_score:
+            return False
+        return self.max_score is None or score < self.max_score
 ```
 
 **区间定义规则**:
@@ -263,17 +294,147 @@ class BucketConfig:
 ### 3.5 配置加载器 (`config_loader.py`)
 
 **配置层级**（优先级从高到低）:
-1. **环境变量**: `FINEWEB_{KEY}` 格式覆盖路径配置
+1. **环境变量**: `FINEWEB_{KEY}` 格式覆盖路径配置（KEY 为大写，如 `FINEWEB_LOG_DIR`）
 2. **YAML 配置**: `config/` 目录下的配置文件
 3. **默认配置**: 代码中硬编码的默认值
 
-**缓存机制**:
+**核心函数**:
 ```python
 @lru_cache(maxsize=10)
-def _load_yaml(name: str) -> dict:
+def _load_yaml(name: str) -> dict[str, Any]:
     """YAML 文件读取结果缓存，避免重复 IO"""
     ...
+
+@lru_cache(maxsize=1)
+def get_dataset_config_dict() -> dict[str, Any]:
+    """获取完整的数据集配置字典"""
+    return _load_yaml("dataset")
+
+def get_dataset_configs() -> dict[str, dict[str, Any]]:
+    """获取所有数据集配置"""
+    return get_dataset_config_dict().get("datasets", {})
+
+def get_dataset_config(dataset_key: str) -> dict[str, Any]:
+    """获取指定数据集的配置"""
+    return get_dataset_configs().get(dataset_key, {})
+
+def get_raw_bucket_configs(dataset_key: str) -> list[dict[str, Any]]:
+    """获取指定数据集的评分桶配置"""
+    return get_dataset_config(dataset_key).get("buckets", [])
+
+@lru_cache(maxsize=1)
+def get_paths_config() -> dict[str, Any]:
+    """获取路径配置，支持环境变量覆盖"""
+    paths = dict(_load_yaml("paths"))
+    for key in paths:
+        if env_var := os.getenv(f"FINEWEB_{key.upper()}"):
+            paths[key] = env_var
+    return paths
 ```
+
+**环境变量覆盖示例**:
+```bash
+export FINEWEB_LOG_DIR="/custom/log/path"
+export FINEWEB_TRIAL_INPUT_DIR="/custom/input"
+```
+
+### 3.6 Parquet 文件合并器 (`parquet_merger.py`)
+
+**职责**: 在 Datatrove Pipeline 处理完成后，将多个小文件合并成指定大小的文件。
+
+**合并策略**:
+
+1. **单文件优化**: 桶内只有一个文件时，直接重命名为 `00000.parquet`，跳过所有 I/O 操作
+2. **流式处理**: 批量并行读取，边读边写，控制内存占用
+3. **桶间串行**: 多个桶按顺序处理，避免内存峰值
+
+**合并流程**:
+```
+输入: bucket_dir/*.parquet
+
+1. 检查文件数量
+   └── 如果只有 1 个文件 → 重命名为 00000.parquet → 结束
+
+2. 流式合并（多个文件时）
+   ├── 获取 schema（从第一个文件）
+   ├── 批量读取（每批 max_workers * 2 个文件）
+   │   └── 使用 ThreadPoolExecutor 并行读取
+   ├── 边读边写
+   │   ├── 当前大小 + 新表大小 > target_file_size?
+   │   │   └── 是 → 关闭当前 writer → 开启新文件
+   │   └── 写入表数据到当前 writer
+   └── 关闭最后一个 writer
+
+3. 清理（可选）
+   └── 并行删除所有源文件
+
+输出: bucket_dir/{00000,00001,...}.parquet
+```
+
+**核心函数**:
+
+```python
+def merge_bucket_files(
+    bucket_dir: Path,
+    target_file_size: int,
+    compression: Compression = "zstd",
+    remove_source: bool = True,
+    max_workers: int | None = None,
+) -> list[Path]:
+    """将桶内的小文件合并成指定大小的大文件。
+
+    采用流式处理方式：
+    1. 单文件直接重命名，跳过合并
+    2. 批量并行读取小文件（控制内存占用）
+    3. 使用 ParquetWriter 边读边写
+    4. 达到目标大小后立即写入，不累积全部数据
+
+    Args:
+        bucket_dir: 桶目录路径
+        target_file_size: 目标文件大小（字节）
+        compression: 压缩格式
+        remove_source: 是否删除源文件
+        max_workers: 并行读取的工作线程数，默认为 min(32, CPU*2)
+
+    Returns:
+        合并后的文件路径列表
+    """
+
+def merge_all_buckets(
+    output_dir: Path,
+    target_file_size: int,
+    compression: Compression = "zstd",
+    remove_source: bool = True,
+    max_workers: int | None = None,
+) -> dict[str, list[Path]]:
+    """串行合并所有桶的文件。
+
+    注意：桶间串行处理，每个桶内部使用并行读取。
+    适合大内存机器（256G+）同时处理多个桶时控制内存占用。
+
+    Args:
+        output_dir: 输出目录（包含各个桶的子目录）
+        target_file_size: 目标文件大小（字节）
+        compression: 压缩格式
+        remove_source: 是否删除源文件
+        max_workers: 每个桶的并行工作线程数
+
+    Returns:
+        每个桶的合并后文件路径字典
+    """
+```
+
+**性能优化要点**:
+
+| 优化点 | 说明 |
+|--------|------|
+| **单文件短路** | 只有一个文件时直接重命名，无 I/O 开销 |
+| **批量并行读取** | 每批读取 `max_workers * 2` 个文件，平衡并行度和内存 |
+| **流式写入** | 使用 `ParquetWriter` 边读边写，不累积全部数据 |
+| **并行删除** | 使用线程池并行删除源文件 |
+| **桶间串行** | 避免多桶同时处理导致的内存峰值 |
+
+**使用位置**: `reorganizer.py` 的 `process_single_dataset()` 函数在 Pipeline 运行完成后调用。
 
 ---
 
@@ -285,11 +446,10 @@ def _load_yaml(name: str) -> dict:
 datasets:
   en:                               # 数据集标识符
     name: "fineweb_edu_en"         # 数据集名称
-    root_marker: "fineweb-edu"     # 路径提取标记（用于自动识别）
     score_normalization:           # 评分归一化配置
       enabled: false               # 英文版无需归一化
-    input_dir: "data/datasets/..." # 输入路径
-    output_dir: "data/datasets/..."# 输出路径
+    input_dir: "data/datasets/HuggingFaceFW/fineweb-edu"  # 输入路径
+    output_dir: "data/datasets/fineweb/en"                # 输出路径
     buckets:                       # 评分桶定义
       - name: "2.5"
         min_score: 2.5
@@ -298,12 +458,15 @@ datasets:
       # ... 更多桶
 
   zh:                              # 中文数据集
-    root_marker: "Fineweb-Edu-Chinese-V2.1"
     score_normalization:
       enabled: true
       multiplier: 5.0              # 归一化评分 × 5
+    input_dir: "data/datasets/opencsg/Fineweb-Edu-Chinese-V2.1"
+    output_dir: "data/datasets/fineweb/zh"
     # ...
 ```
+
+**自动识别机制**: 系统通过匹配 `input_dir` 路径来识别数据集类型，而非使用 `root_marker`。
 
 ### 4.2 处理参数配置 (`config/processing.yaml`)
 
@@ -377,12 +540,40 @@ LocalPipelineExecutor
 - 对于 I/O 密集型任务，可适当增加 `workers`
 - 每个 worker 处理 `tasks / workers` 个任务
 
-### 5.3 内存优化
+### 5.3 内存与文件优化
+
+#### 5.3.1 Pipeline 阶段优化
 
 - **流式处理**: 基于生成器的流水线，避免全量加载
-- **缓冲写入**: 按文件大小阈值批量写入，减少小文件
+- **缓冲写入**: `BucketPathWriter` 按文件大小阈值批量写入，减少小文件
 - **对象复用**: 使用 `@lru_cache` 缓存配置对象
-- **文件合并**: 处理完成后自动合并小文件
+
+#### 5.3.2 文件合并阶段优化 (`ParquetMerger`)
+
+**问题背景**: 
+Datatrove Pipeline 会产生大量小文件（每个 task 写入一个文件）。英文数据集使用 2500 tasks 时，每个桶可能产生数百到数千个小文件。传统串行合并方式速度极慢，甚至比数据处理本身还耗时。
+
+**优化策略**:
+
+| 优化项 | 实现方式 | 效果 |
+|--------|---------|------|
+| **单文件短路** | 只有一个文件时直接 `rename` 为 `00000.parquet` | 零 I/O 开销 |
+| **批量并行读取** | 每批读取 `max_workers * 2` 个文件 | I/O 并行化 |
+| **流式写入** | 使用 `ParquetWriter` 边读边写，不累积全部表 | 内存占用稳定 |
+| **并行删除** | 使用 `ThreadPoolExecutor` 批量删除源文件 | 清理加速 |
+| **桶间串行** | 多个桶按顺序处理 | 避免内存峰值 |
+
+**内存占用估算**:
+```
+峰值内存 ≈ batch_size × 平均文件大小
+         = (max_workers × 2) × 500KB
+         = 64 × 500KB = 32MB (max_workers=32 时)
+```
+
+**使用建议**:
+- 大内存机器（256GB+）可设置 `max_workers=32` 或更高
+- 合并阶段与 Pipeline 阶段共享 `workers` 参数
+- 单文件桶自动跳过合并，符合最终命名规范
 
 ---
 
@@ -390,10 +581,10 @@ LocalPipelineExecutor
 
 ### 6.1 评分差异处理
 
-| 数据集 | 原始评分范围 | 存储格式 | 处理方式 |
-|--------|-------------|----------|----------|
-| HuggingFaceFW/fineweb-edu | 1.0-5.0 | 原始值 | 直接使用 |
-| Fineweb-Edu-Chinese-V2.1 | 0.0-5.0 | 归一化 0.0-1.0 | 自动 ×5 转换 |
+| 数据集 | 存储格式 | 处理方式 |
+|--------|----------|----------|
+| HuggingFaceFW/fineweb-edu | 原始值 (1.0-5.0) | 直接使用 |
+| Fineweb-Edu-Chinese-V2.1 | 归一化 (0.0-1.0) | 自动 ×5 转换 |
 
 ### 6.2 中文数据集评分详解
 
@@ -402,14 +593,14 @@ LocalPipelineExecutor
 
 **核心发现**:
 - **存储格式**: 归一化浮点数 0.0-1.0
-- **映射公式**: `original_score = normalized_score × 5`
+- **映射公式**: `score = normalized_score × 5`
 - **官方验证**: [OpenCSG 回复](https://huggingface.co/datasets/opencsg/chinese-fineweb-edu-v2/discussions/2)
 
 **数据集预过滤**:
-仅保留原始评分 ≥ 2.5 的样本：
+仅保留归一化评分 ≥ 0.50（转换后评分 ≥ 2.5）的样本：
 
-| 文件夹 | 归一化范围 | 原始评分 |
-|--------|-----------|---------|
+| 文件夹 | 归一化范围 | 转换后评分 |
+|--------|-----------|-----------|
 | `2_3/` | 0.50-0.60 | 2.5-3.0 |
 | `3_4/` | 0.60-0.80 | 3.0-4.0 |
 | `4_5/` | 0.80-0.94 | 4.0-4.70 |
@@ -417,14 +608,17 @@ LocalPipelineExecutor
 ### 6.3 自动检测机制
 
 ```python
-def _get_dataset_config_for_source(source: str) -> dict:
-    """根据文件路径自动识别数据集类型"""
-    datasets = get_dataset_configs()
-    for lang, config in datasets.items():
-        marker = config.get("root_marker", "")
-        if marker and marker in source:
+def _get_dataset_config_for_source(reader: Any | None = None) -> dict[str, Any]:
+    """根据数据读取器自动识别数据集类型"""
+    all_configs = get_dataset_configs()
+    data_folder_path = str(reader.data_folder.path)
+    
+    for config in all_configs.values():
+        input_dir = config.get("input_dir", "")
+        if input_dir and input_dir in data_folder_path:
             return config
-    return datasets.get("en", {})
+    
+    return {}
 ```
 
 ---
@@ -516,11 +710,10 @@ buckets:
 datasets:
   new_lang:
     name: "fineweb_edu_new"
-    root_marker: "dataset-root-folder"
     score_normalization:
       enabled: true  # 或 false
       multiplier: 5.0
-    input_dir: "data/datasets/..."
+    input_dir: "data/datasets/your-dataset"
     output_dir: "data/datasets/fineweb/new_lang"
     buckets:
       - name: "2.5"
@@ -548,35 +741,11 @@ src/data_processing/
     └── processor.py         # 处理逻辑（可选）
 ```
 
-在 `adapters.py` 中实现数据集特定的适配器函数：
+在 `adapters.py` 中实现数据集特定的适配器函数，核心逻辑参考 `fineweb_edu/adapters.py`：
 
-```python
-def your_dataset_adapter(reader, raw: dict, source: str, idx: int) -> dict | None:
-    """适配原始数据为统一格式。
-
-    Args:
-        reader: 数据读取器
-        raw: 原始数据行
-        source: 源文件路径
-        idx: 行索引
-
-    Returns:
-        标准化后的数据字典，包含 text, id, metadata 字段
-        如果数据无效则返回 None
-    """
-    text = raw.get("text", "")
-    if not text:
-        return None
-
-    return {
-        "text": text,
-        "id": f"{source}#{idx}",
-        "metadata": {
-            "score": raw.get("quality_score"),
-            # 其他元数据字段
-        },
-    }
-```
+- 实现 `normalize_score()` 函数处理评分转换
+- 实现 `_get_dataset_config_for_source()` 函数自动识别数据集
+- 实现适配器函数（如 `your_dataset_adapter()`）转换原始数据格式
 
 然后在 `config/dataset.yaml` 中添加新数据集的配置。
 

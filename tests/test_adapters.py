@@ -5,7 +5,13 @@ from src.data_processing.fineweb_edu import fineweb_adapter, normalize_score
 
 @pytest.fixture
 def reader():
-    return object()
+    class MockPath:
+        path = "/tmp/test_data"
+
+    class MockReader:
+        data_folder = MockPath()
+
+    return MockReader()
 
 
 @pytest.fixture
@@ -43,15 +49,16 @@ class TestIdGeneration:
                 0,
                 "data/CC-MAIN-2013-20/train.parquet#0",
             ),
+            # 原始实现直接使用 source 作为 id，不进行路径截断
             (
                 "data/datasets/HuggingFaceFW/fineweb-edu/data/CC-MAIN-2013-20/train.parquet",
                 1,
-                "data/CC-MAIN-2013-20/train.parquet#1",
+                "data/datasets/HuggingFaceFW/fineweb-edu/data/CC-MAIN-2013-20/train.parquet#1",
             ),
             (
                 "data/datasets/opencsg/Fineweb-Edu-Chinese-V2.1/data/train.parquet",
                 0,
-                "data/train.parquet#0",
+                "data/datasets/opencsg/Fineweb-Edu-Chinese-V2.1/data/train.parquet#0",
             ),
         ],
     )

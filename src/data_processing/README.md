@@ -139,39 +139,7 @@ from src.data_processing.bucket_config import BucketConfig
 from src.data_processing.score_filter import ScoreFilter
 ```
 
-## 扩展：添加新的数据集处理
-
-参考 `fineweb_edu/` 目录结构创建新的子模块：
-
-```
-src/data_processing/
-└── your_dataset/
-    ├── __init__.py          # 导出 API
-    ├── __main__.py          # CLI 入口（可选）
-    ├── adapters.py          # 数据适配器
-    └── processor.py         # 处理逻辑
-```
-
-实现适配器函数：
-
-```python
-def your_dataset_adapter(reader, raw: dict, source: str, idx: int) -> dict | None:
-    text = raw.get("text", "")
-    if not text:
-        return None
-
-    return {
-        "text": text,
-        "id": f"{source}#{idx}",
-        "metadata": {
-            "score": raw.get("quality_score"),
-        },
-    }
-```
-
-在 `config/dataset.yaml` 中添加数据集配置。
-
 ## 相关文档
 
-- [完整设计文档](../../docs/fineweb_edu_data_reorganization_design.md) - 架构设计、算法详解
+- [完整设计文档](../../docs/fineweb_edu_data_reorganization_design.md) - 架构设计、扩展指南
 - [项目 README](../../README.md) - 项目总体说明
