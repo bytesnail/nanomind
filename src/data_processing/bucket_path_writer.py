@@ -9,6 +9,9 @@ from .config_loader import DEFAULT_COMPRESSION, DEFAULT_MAX_FILE_SIZE, Compressi
 
 
 class BucketPathWriter(PipelineStep):
+    name = "Bucket Writer"
+    type = "💾 - WRITER"
+
     def __init__(
         self,
         output_dir: str,

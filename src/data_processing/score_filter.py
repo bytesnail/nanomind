@@ -6,6 +6,9 @@ from .bucket_config import BucketConfig, _find_bucket_in_sorted
 
 
 class ScoreFilter(PipelineStep):
+    name = "Score Filter"
+    type = "🎯 - FILTER"
+
     def __init__(self, buckets: list[BucketConfig], random_seed: int = 42):
         super().__init__()
         self.buckets = buckets
