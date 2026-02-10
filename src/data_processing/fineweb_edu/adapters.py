@@ -3,15 +3,6 @@ from typing import Any
 from ..config_loader import get_dataset_configs
 
 
-def _generate_id(source_path: str, idx: int, root_marker: str) -> str:
-    sep = f"{root_marker}/"
-    if sep in source_path:
-        rel_path = source_path.split(sep, 1)[1]
-    else:
-        rel_path = source_path
-    return f"{rel_path}#{idx}"
-
-
 def normalize_score(
     raw_score: Any, normalization_config: dict[str, Any] | None
 ) -> float:
@@ -22,30 +13,33 @@ def normalize_score(
     return score
 
 
-def _get_dataset_config_for_source(source: str) -> dict[str, Any]:
-    datasets = get_dataset_configs()
-    for _lang, config in datasets.items():
-        marker = config.get("root_marker", "")
-        if marker and marker in source:
+def _get_dataset_config_for_source(reader: Any | None = None) -> dict[str, Any]:
+    all_configs = get_dataset_configs()
+
+    data_folder_path = str(reader.data_folder.path)
+
+    for config in all_configs.values():
+        input_dir = config.get("input_dir", "")
+        if input_dir and input_dir in data_folder_path:
             return config
-    return datasets.get("en", {})
+
+    return {}
 
 
 def fineweb_adapter(
-    _reader: Any, raw: dict, source: str, idx: int
+    reader: Any, raw: dict, source: str, idx: int
 ) -> dict[str, Any] | None:
     text = raw.get("text", "")
     if not text:
         return None
 
-    dataset_config = _get_dataset_config_for_source(source)
-    root_marker = dataset_config.get("root_marker", "fineweb-edu")
+    dataset_config = _get_dataset_config_for_source(reader)
     score_normalization = dataset_config.get("score_normalization")
 
     dump = raw.get("dump", "")
     return {
         "text": text,
-        "id": _generate_id(source, idx, root_marker),
+        "id": f"{source}#{idx}",
         "metadata": {
             "score": normalize_score(raw.get("score"), score_normalization),
             "cc_main": dump if dump.startswith("CC-MAIN-") else "unknown",

@@ -1,7 +1,6 @@
 datasets:
   en:
     name: "fineweb_edu_en"
-    root_marker: "fineweb-edu"
     score_normalization:
       enabled: false
     input_dir: "data/datasets/HuggingFaceFW/fineweb-edu"
@@ -24,7 +23,6 @@ datasets:
         sampling_rate: 1.0
   zh:
     name: "fineweb_edu_zh"
-    root_marker: "Fineweb-Edu-Chinese-V2.1"
     score_normalization:
       enabled: true
       multiplier: 5.0

@@ -40,9 +40,8 @@ def _create_test_dataset(
     files = list(source.rglob("*.parquet"))[:max_files]
     logger.info(f"[{dataset_key}] 选择 {len(files)} 个文件用于测试")
 
-    # 获取数据集根标记以保留完整路径结构
     dataset_config = get_dataset_config(dataset_key)
-    root_marker = dataset_config.get("root_marker", "")
+    norm_config = dataset_config.get("score_normalization")
     stats = {"total_files": 0, "total_rows": 0, "score_distribution": {}}
 
     for i, f in enumerate(files):
@@ -51,7 +50,6 @@ def _create_test_dataset(
             table = table.slice(0, min(max_rows, table.num_rows))
 
             if "score" in table.column_names:
-                norm_config = dataset_config.get("score_normalization")
                 for raw_score in table.column("score").to_pylist():
                     score = normalize_score(raw_score, norm_config)
                     b = find_bucket_for_score(score, dataset_key)
@@ -60,13 +58,9 @@ def _create_test_dataset(
                         stats["score_distribution"].get(name, 0) + 1
                     )
 
-            # 保留包含数据集标记的完整路径结构，以便适配器正确识别
-            if root_marker and root_marker in str(f):
-                rel = Path(str(f).split(root_marker, 1)[1].lstrip("/"))
-                dest = out / root_marker / rel
-            else:
-                rel = f.relative_to(source)
-                dest = out / rel
+            # 保留相对于源目录的相对路径结构
+            rel = f.relative_to(source)
+            dest = out / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             pq.write_table(table, dest, compression="zstd")
 
