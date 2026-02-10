@@ -1,3 +1,4 @@
+import argparse
 import logging
 import shutil
 import sys
@@ -6,8 +7,8 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
-sys.path.insert(0, str(Path(__file__).parent))
-from validate_output import print_report, validate_all_buckets
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from scripts.validate_output import print_report, validate_all_buckets
 from src.data_processing.bucket_config import (
     find_bucket_for_score,
     get_all_bucket_configs,
@@ -267,11 +268,109 @@ def run_trial_all(
 
 
 def main() -> int:
-    trial_cfg = _processing_cfg.get("trial", {})
-    return run_trial_all(
-        max_files=trial_cfg.get("max_files", 5),
-        max_rows=trial_cfg.get("max_rows", 2000),
+    parser = argparse.ArgumentParser(
+        description="FineWeb-Edu 数据试运行工具 - 小规模测试处理流程"
     )
+    parser.add_argument(
+        "--dataset",
+        "-d",
+        type=str,
+        default=None,
+        help="指定要处理的数据集键 (如 'en', 'zh')，不指定则处理所有数据集",
+    )
+    parser.add_argument(
+        "--source",
+        "-s",
+        type=Path,
+        default=None,
+        help="源数据目录路径 (覆盖配置中的 input_dir)",
+    )
+    parser.add_argument(
+        "--test-input",
+        type=Path,
+        default=None,
+        help="测试输入目录路径",
+    )
+    parser.add_argument(
+        "--test-output",
+        type=Path,
+        default=None,
+        help="测试输出目录路径",
+    )
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=2,
+        help="并行 workers 数量 (默认: 2)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="随机种子 (默认: 42)",
+    )
+    parser.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        help="最大处理文件数 (默认: 使用配置值 5)",
+    )
+    parser.add_argument(
+        "--max-rows",
+        type=int,
+        default=None,
+        help="每文件最大行数 (默认: 使用配置值 2000)",
+    )
+    parser.add_argument(
+        "--skip-create-test",
+        action="store_true",
+        help="跳过测试数据创建阶段",
+    )
+    parser.add_argument(
+        "--skip-processing",
+        action="store_true",
+        help="跳过处理阶段",
+    )
+    parser.add_argument(
+        "--analyze-sampling",
+        "-a",
+        action="store_true",
+        help="分析采样准确性",
+    )
+
+    args = parser.parse_args()
+
+    trial_cfg = _processing_cfg.get("trial", {})
+    max_files = (
+        args.max_files if args.max_files is not None else trial_cfg.get("max_files", 5)
+    )
+    max_rows = (
+        args.max_rows if args.max_rows is not None else trial_cfg.get("max_rows", 2000)
+    )
+
+    if args.dataset:
+        return run_trial(
+            dataset_key=args.dataset,
+            source=args.source,
+            test_input=args.test_input,
+            test_output=args.test_output,
+            workers=args.workers,
+            seed=args.seed,
+            max_files=max_files,
+            max_rows=max_rows,
+            skip_create_test=args.skip_create_test,
+            skip_processing=args.skip_processing,
+            analyze_sampling=args.analyze_sampling,
+        )
+    else:
+        return run_trial_all(
+            workers=args.workers,
+            seed=args.seed,
+            max_files=max_files,
+            max_rows=max_rows,
+            analyze_sampling=args.analyze_sampling,
+        )
 
 
 if __name__ == "__main__":

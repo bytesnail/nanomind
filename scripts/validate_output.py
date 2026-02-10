@@ -1,3 +1,4 @@
+import argparse
 import json
 import logging
 import sys
@@ -202,7 +203,56 @@ def validate_all(verbose: bool = False, json_output: Path | None = None) -> int:
 
 
 def main() -> int:
-    return validate_all()
+    parser = argparse.ArgumentParser(
+        description="FineWeb-Edu 输出验证工具 - 验证分桶结果的正确性"
+    )
+    parser.add_argument(
+        "--input",
+        "-i",
+        type=Path,
+        default=None,
+        help="输入目录路径 (验证单个目录，覆盖配置中的 output_dir)",
+    )
+    parser.add_argument(
+        "--dataset",
+        "-d",
+        type=str,
+        default="en",
+        help="数据集键 (如 'en', 'zh')，默认: en",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="显示详细错误信息",
+    )
+    parser.add_argument(
+        "--json-output",
+        "-j",
+        type=Path,
+        default=None,
+        help="将验证结果保存为 JSON 文件",
+    )
+    parser.add_argument(
+        "--all",
+        "-a",
+        action="store_true",
+        help="验证所有配置的数据集",
+    )
+
+    args = parser.parse_args()
+
+    if args.all:
+        return validate_all(verbose=args.verbose, json_output=args.json_output)
+    elif args.input:
+        return validate(
+            input_dir=args.input,
+            dataset_key=args.dataset,
+            verbose=args.verbose,
+            json_output=args.json_output,
+        )
+    else:
+        return validate_all(verbose=args.verbose, json_output=args.json_output)
 
 
 if __name__ == "__main__":
