@@ -120,13 +120,13 @@ def process_single_dataset(
         max_size=max_size,
     ).run()
 
-    # 合并小文件
     logger.info(f"开始合并文件，目标大小: {max_size / 1024 / 1024:.0f}MB")
     merge_all_buckets(
         output_dir=output_dir,
         target_file_size=max_size,
         compression=compression,
         remove_source=True,
+        max_workers=workers,
     )
 
     logger.info(f"处理完成: {names}")

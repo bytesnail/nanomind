@@ -2,7 +2,7 @@ workers: 32
 tasks: 2500
 random_seed: 42
 compression: "zstd"
-max_file_size_bytes: 2147483648
+max_file_size_bytes: 10737418240
 
 logging:
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
