@@ -90,23 +90,13 @@ python scripts/validate_output.py --input data/datasets/fineweb/en
 python scripts/trial_run.py
 ```
 
-### 环境变量
-
-```bash
-export FINEWEB_LOG_DIR="custom/logs"
-export FINEWEB_TRIAL_INPUT_DIR="data/test_input"
-export FINEWEB_TRIAL_OUTPUT_DIR="data/test_output"
-
-python -m src.data_processing.fineweb_edu
-```
-
 ## 配置系统
 
 配置文件位于 `config/` 目录：
 
 - `dataset.yaml` - 数据集定义（评分桶、归一化配置、路径）
 - `processing.yaml` - 处理参数（workers、compression、文件大小）
-- `paths.yaml` - 路径配置（支持环境变量覆盖）
+- `paths.yaml` - 路径配置
 
 ## 模块导入
 

@@ -30,7 +30,7 @@
 | **单次读取多桶处理** | 单遍读取输入数据，同时处理所有评分桶，I/O 效率提升约 75% |
 | **确定性采样** | 基于 MD5 哈希的伪随机采样，确保结果可复现 |
 | **多语言支持** | 自动识别英文原版（1.0-5.0分）和中文版本（归一化0.0-1.0分） |
-| **灵活配置** | YAML 配置文件 + 环境变量覆盖机制 |
+| **灵活配置** | YAML 配置文件 |
 | **模块化架构** | 基于 Datatrove Pipeline 的组件化设计，易于扩展 |
 
 ### 1.3 评分桶策略
@@ -72,7 +72,7 @@
 │  配置文件层 (config/)                                                         │
 │  ├── dataset.yaml        # 数据集定义（输入路径、评分桶、归一化配置）            │
 │  ├── processing.yaml     # 处理参数（workers、压缩、文件大小）                 │
-│  └── paths.yaml          # 路径配置（支持环境变量覆盖）                        │
+│  └── paths.yaml          # 路径配置                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  数据处理层 (src/data_processing/)                                            │
 │  ├── fineweb_edu/              # FineWeb-Edu 专用子模块                        │
@@ -82,7 +82,7 @@
 │  ├── score_filter.py           # 评分过滤 + 确定性采样（通用）                 │
 │  ├── bucket_path_writer.py     # 多桶并行写入器（通用）                        │
 │  ├── parquet_merger.py         # Parquet 文件合并工具（通用）                  │
-│  └── config_loader.py          # 配置加载器（缓存 + 环境变量）                 │
+│  └── config_loader.py          # 配置加载器（带缓存）                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  工具脚本层 (scripts/)                                                        │
 │  ├── trial_run.py              # 试运行脚本（创建测试数据 + 验证）              │
@@ -294,9 +294,8 @@ class BucketConfig:
 ### 3.5 配置加载器 (`config_loader.py`)
 
 **配置层级**（优先级从高到低）:
-1. **环境变量**: `FINEWEB_{KEY}` 格式覆盖路径配置（KEY 为大写，如 `FINEWEB_LOG_DIR`）
-2. **YAML 配置**: `config/` 目录下的配置文件
-3. **默认配置**: 代码中硬编码的默认值
+1. **YAML 配置**: `config/` 目录下的配置文件
+2. **默认配置**: 代码中硬编码的默认值
 
 **核心函数**:
 ```python
@@ -324,18 +323,8 @@ def get_raw_bucket_configs(dataset_key: str) -> list[dict[str, Any]]:
 
 @lru_cache(maxsize=1)
 def get_paths_config() -> dict[str, Any]:
-    """获取路径配置，支持环境变量覆盖"""
-    paths = dict(_load_yaml("paths"))
-    for key in paths:
-        if env_var := os.getenv(f"FINEWEB_{key.upper()}"):
-            paths[key] = env_var
-    return paths
-```
-
-**环境变量覆盖示例**:
-```bash
-export FINEWEB_LOG_DIR="/custom/log/path"
-export FINEWEB_TRIAL_INPUT_DIR="/custom/input"
+    """获取路径配置"""
+    return _load_yaml("paths")
 ```
 
 ### 3.6 Parquet 文件合并器 (`parquet_merger.py`)
@@ -486,14 +475,6 @@ trial:                            # 试运行参数
   max_rows: 2000
   max_file_size_bytes: 134217728  # 128MB
 ```
-
-### 4.3 环境变量
-
-| 变量名 | 说明 | 示例 |
-|--------|------|------|
-| `FINEWEB_LOG_DIR` | 日志目录 | `logs/fineweb_processing` |
-| `FINEWEB_TRIAL_INPUT_DIR` | 试运行输入目录 | `data/test_input` |
-| `FINEWEB_TRIAL_OUTPUT_DIR` | 试运行输出目录 | `data/test_output` |
 
 ---
 

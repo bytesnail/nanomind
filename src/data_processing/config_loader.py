@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -38,11 +37,7 @@ def get_processing_config() -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def get_paths_config() -> dict[str, Any]:
-    paths = dict(_load_yaml("paths"))
-    for key in paths:
-        if env_var := os.getenv(f"FINEWEB_{key.upper()}"):
-            paths[key] = env_var
-    return paths
+    return _load_yaml("paths")
 
 
 def get_dataset_configs() -> dict[str, dict[str, Any]]:
