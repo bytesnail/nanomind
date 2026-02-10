@@ -139,7 +139,7 @@ class TestMergeBucketFiles:
         )
 
         assert len(result) == 1
-        assert (bucket_dir / "00000_00000.parquet").exists()  # 源文件仍在
+        assert (bucket_dir / "00000.parquet").exists()
 
 
 class TestMergeAllBuckets:

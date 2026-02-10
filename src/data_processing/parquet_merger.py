@@ -4,6 +4,8 @@
 """
 
 import logging
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pyarrow as pa
@@ -14,19 +16,46 @@ from .config_loader import Compression
 logger = logging.getLogger(__name__)
 
 
+def _read_parquet_file(file_path: Path) -> tuple[Path, pa.Table | None]:
+    """读取单个 parquet 文件。"""
+    try:
+        table = pq.read_table(file_path)
+        return file_path, table
+    except Exception as e:
+        logger.error(f"读取文件失败 {file_path}: {e}")
+        return file_path, None
+
+
+def _delete_file(file_path: Path) -> bool:
+    """删除单个文件。"""
+    try:
+        file_path.unlink()
+        return True
+    except Exception as e:
+        logger.warning(f"删除源文件失败 {file_path}: {e}")
+        return False
+
+
 def merge_bucket_files(
     bucket_dir: Path,
     target_file_size: int,
     compression: Compression = "zstd",
     remove_source: bool = True,
+    max_workers: int | None = None,
 ) -> list[Path]:
     """将桶内的小文件合并成指定大小的大文件。
+
+    采用流式处理方式：
+    1. 批量并行读取小文件（控制内存占用）
+    2. 使用 ParquetWriter 边读边写
+    3. 达到目标大小后立即写入，不累积全部数据
 
     Args:
         bucket_dir: 桶目录路径
         target_file_size: 目标文件大小（字节）
         compression: 压缩格式
         remove_source: 是否删除源文件
+        max_workers: 并行读取的工作线程数
 
     Returns:
         合并后的文件路径列表
@@ -40,92 +69,97 @@ def merge_bucket_files(
         logger.info(f"桶目录为空: {bucket_dir}")
         return []
 
-    # 如果只有一个文件且大小已经合适，不需要合并
     if len(parquet_files) == 1:
-        file_size = parquet_files[0].stat().st_size
-        if file_size >= target_file_size * 0.5:  # 至少达到目标大小的50%
-            logger.info(f"桶 {bucket_dir.name} 只有一个合适大小的文件，跳过合并")
-            return parquet_files
+        source_file = parquet_files[0]
+        target_file = bucket_dir / "00000.parquet"
+        if source_file.name != target_file.name:
+            source_file.rename(target_file)
+            logger.info(
+                f"桶 {bucket_dir.name} 只有一个文件，重命名为 {target_file.name}"
+            )
+        else:
+            logger.info(f"桶 {bucket_dir.name} 只有一个文件，无需处理")
+        return [target_file]
 
     logger.info(
         f"合并桶 {bucket_dir.name}: {len(parquet_files)} 个文件 -> 目标大小 {target_file_size / 1024 / 1024:.0f}MB"
     )
 
-    merged_files: list[Path] = []
-    current_tables: list[pa.Table] = []
-    current_size = 0
-    file_counter = 0
+    if max_workers is None:
+        max_workers = min(32, multiprocessing.cpu_count() * 2)
 
-    for parquet_file in parquet_files:
-        try:
-            table = pq.read_table(parquet_file)
+    # 获取 schema
+    try:
+        first_table = pq.read_table(parquet_files[0])
+        schema = first_table.schema
+    except Exception as e:
+        logger.error(f"无法读取第一个文件获取 schema: {e}")
+        return []
+
+    merged_files: list[Path] = []
+    file_counter = 0
+    current_writer: pq.ParquetWriter | None = None
+    current_path: Path | None = None
+    current_size = 0
+    batch_size = max_workers * 2
+    processed_sources: list[Path] = []
+
+    for i in range(0, len(parquet_files), batch_size):
+        batch = parquet_files[i : i + batch_size]
+
+        # 并行读取批次
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {
+                executor.submit(_read_parquet_file, pf): pf for pf in batch
+            }
+            batch_tables = []
+            for future in as_completed(future_to_file):
+                file_path, table = future.result()
+                if table is not None:
+                    batch_tables.append((file_path, table))
+
+        batch_tables.sort(key=lambda x: x[0].name)
+
+        for file_path, table in batch_tables:
             table_size = sum(col.nbytes for col in table.columns)
 
-            # 检查添加此表后是否会超过目标大小
-            if current_tables and current_size + table_size > target_file_size:
-                # 写入当前累积的数据
-                merged_file = _write_merged_file(
-                    bucket_dir, current_tables, file_counter, compression
-                )
-                merged_files.append(merged_file)
+            if (
+                current_writer is not None
+                and current_size + table_size > target_file_size
+            ):
+                current_writer.close()
+                assert current_path is not None
+                file_size_mb = current_path.stat().st_size / 1024 / 1024
+                logger.info(f"写入合并文件: {current_path.name} ({file_size_mb:.1f}MB)")
+                merged_files.append(current_path)
                 file_counter += 1
-
-                # 重置累积状态
-                current_tables = []
+                current_writer = None
                 current_size = 0
 
-            current_tables.append(table)
+            if current_writer is None:
+                current_path = bucket_dir / f"{file_counter:05d}.parquet"
+                current_writer = pq.ParquetWriter(
+                    current_path, schema, compression=compression
+                )
+
+            current_writer.write_table(table)
             current_size += table_size
+            processed_sources.append(file_path)
 
-        except Exception as e:
-            logger.error(f"读取文件失败 {parquet_file}: {e}")
-            continue
+    if current_writer is not None:
+        current_writer.close()
+        assert current_path is not None
+        file_size_mb = current_path.stat().st_size / 1024 / 1024
+        logger.info(f"写入合并文件: {current_path.name} ({file_size_mb:.1f}MB)")
+        merged_files.append(current_path)
 
-    # 写入剩余的数据
-    if current_tables:
-        merged_file = _write_merged_file(
-            bucket_dir, current_tables, file_counter, compression
-        )
-        merged_files.append(merged_file)
-
-    # 删除源文件
     if remove_source and merged_files:
-        for parquet_file in parquet_files:
-            try:
-                parquet_file.unlink()
-            except Exception as e:
-                logger.warning(f"删除源文件失败 {parquet_file}: {e}")
+        logger.debug(f"删除 {len(processed_sources)} 个源文件")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(_delete_file, processed_sources))
 
     logger.info(f"桶 {bucket_dir.name} 合并完成: {len(merged_files)} 个文件")
     return merged_files
-
-
-def _write_merged_file(
-    bucket_dir: Path,
-    tables: list[pa.Table],
-    counter: int,
-    compression: Compression,
-) -> Path:
-    """将多个表写入合并后的文件。"""
-    if not tables:
-        raise ValueError("表列表不能为空")
-
-    # 合并所有表
-    merged_table = pa.concat_tables(tables)
-
-    # 生成文件名: {counter:05d}.parquet
-    output_path = bucket_dir / f"{counter:05d}.parquet"
-
-    # 写入文件
-    pq.write_table(merged_table, output_path, compression=compression)
-
-    file_size_mb = output_path.stat().st_size / 1024 / 1024
-    row_count = len(merged_table)
-    logger.info(
-        f"写入合并文件: {output_path.name} ({file_size_mb:.1f}MB, {row_count} 行)"
-    )
-
-    return output_path
 
 
 def merge_all_buckets(
@@ -133,14 +167,16 @@ def merge_all_buckets(
     target_file_size: int,
     compression: Compression = "zstd",
     remove_source: bool = True,
+    max_workers: int | None = None,
 ) -> dict[str, list[Path]]:
-    """合并所有桶的文件。
+    """串行合并所有桶的文件。
 
     Args:
         output_dir: 输出目录（包含各个桶的子目录）
         target_file_size: 目标文件大小（字节）
         compression: 压缩格式
         remove_source: 是否删除源文件
+        max_workers: 每个桶的并行工作线程数
 
     Returns:
         每个桶的合并后文件路径字典
@@ -151,11 +187,10 @@ def merge_all_buckets(
         logger.warning(f"输出目录不存在: {output_dir}")
         return results
 
-    # 遍历所有桶目录
     for bucket_dir in output_dir.iterdir():
         if bucket_dir.is_dir():
             merged = merge_bucket_files(
-                bucket_dir, target_file_size, compression, remove_source
+                bucket_dir, target_file_size, compression, remove_source, max_workers
             )
             if merged:
                 results[bucket_dir.name] = merged
