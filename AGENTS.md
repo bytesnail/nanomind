@@ -46,7 +46,7 @@ uv add --dev <dev-package> --no-sync
 ### 核心依赖
 
 - **运行时**: torch, torchvision, transformers, datasets, datatrove, matplotlib, tqdm
-- **开发**: black, ruff, pytest
+- **开发**: ruff, pytest
 
 ## 常用命令
 
@@ -72,7 +72,7 @@ python scripts/validate_output.py --input ...   # 验证结果
 
 | 规则 | 说明 |
 |------|------|
-| **行长度** | 88 字符 (Black 默认) |
+| **行长度** | 88 字符 |
 | **引号** | 双引号优先 |
 | **命名** | snake_case(函数/变量), PascalCase(类), UPPER_CASE(常量), _leading_underscore(私有) |
 | **导入** | 标准库 → 第三方 → 本地模块，绝对导入 |
