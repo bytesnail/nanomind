@@ -168,7 +168,6 @@ filelock==3.20.3
     #   ray
     #   tldextract
     #   torch
-    #   transformers
     #   virtualenv
 flask==3.1.2
     # via
@@ -807,7 +806,7 @@ tqdm==4.67.3
     #   transformers
 trafilatura==1.11.0
     # via datatrove
-transformers==5.0.0
+transformers==5.1.0
     # via nanomind (pyproject.toml)
 triton==3.6.0
     # via torch
