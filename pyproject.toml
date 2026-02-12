@@ -9,6 +9,7 @@ dependencies = [
     "datatrove[all]>=0.8.0",
     "matplotlib>=3.10.8",
     "pybloom-live>=4.0.0",
+    "tokenizers>=0.22.0",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
     "tqdm>=4.67.3",
