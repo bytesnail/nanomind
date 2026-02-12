@@ -1,18 +1,8 @@
 # Tokenizer 训练设计文档
 
 > **目标**: 训练与 Qwen3-Next 兼容的 64K 词表 BPE Tokenizer  
-> **训练样本**: 4000 万条多领域混合数据  
+> **训练样本**: 40M 多领域混合数据  
 > **更新日期**: 2026-02-13
-
----
-
-## 目录
-
-1. [核心配置](#1-核心配置)
-2. [训练数据](#2-训练数据)
-3. [训练流程](#3-训练流程)
-4. [验证与输出](#4-验证与输出)
-5. [参考与实现](#5-参考与实现)
 
 ---
 
@@ -22,23 +12,22 @@
 
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
-| **总词表大小** | 64005 | ID 0-64004（调用训练脚本时使用 `--vocab-size 64005`） |
+| **总词表大小** | 64005 | ID 0-64004（训练时使用 `--vocab-size 64005`） |
 | **BPE tokens** | 64000 | 从数据学习（ID 0-63999） |
 | **特殊 tokens** | 5 | 手动定义（ID 64000-64004） |
 | **算法** | BPE | Byte Pair Encoding |
-| **训练样本** | 4000 万条 | 多领域混合数据 |
 | **BPE 最小词频** | 2 | min_frequency |
 | **基础架构** | Qwen3-Next | 仅复制配置（pretokenizer/normalizer/decoder），不继承词表 |
 
 ### 1.2 特殊 Token
 
-| Token | ID | 用途 | 模型配置 |
-|-------|-----|------|----------|
-| `<|endoftext|>` | 64000 | pad_token | `tokenizer.pad_token` |
-| `<|im_end|>` | 64002 | eos_token | `tokenizer.eos_token` |
-| `<|im_start|>` | 64001 | 对话开始 | 特殊标记 |
-| `<|think|>` | 64003 | 推理开始 | 特殊标记 |
-| `<|/think|>` | 64004 | 推理结束 | 特殊标记 |
+| ID | Token | 用途 | 模型配置 |
+|----|-------|------|----------|
+| 64000 | `<|endoftext|>` | 文本结束 | `tokenizer.pad_token` |
+| 64001 | `<|im_start|>` | 对话开始 | 特殊标记 |
+| 64002 | `<|im_end|>` | 对话结束 | `tokenizer.eos_token` |
+| 64003 | `<|think|>` | 推理开始 | 特殊标记 |
+| 64004 | `<|/think|>` | 推理结束 | 特殊标记 |
 
 > **注意**: `bos_token` 和 `unk_token` 设为 `None`
 
@@ -59,9 +48,10 @@
 
 | 数据集 | 样本数 | 占比 | 明细 |
 |--------|--------|------|------|
-| **FineWeb** | 22M | 55% | en: 4.0分(5.4M), 3.5分(2.4M), 3.0分(2.4M), 2.5分(1.8M)<br>zh: 4.0分(4.5M), 3.5分(2.0M), 3.0分(2.0M), 2.5分(1.5M) |
-| **GitHub Code** | 12M | 30% | ≥2 stars(10M), <2 stars(2M) |
-| **Nemotron-CC-Math** | 6M | 15% | 4plus(3.0M), 4plus_MIND(1.92M), 3(1.08M) |
+| **FineWeb-EN** | 12.0M | 30% | 4.0分(5.4M), 3.5分(2.4M), 3.0分(2.4M), 2.5分(1.8M) |
+| **FineWeb-ZH** | 10.0M | 25% | 4.0分(4.5M), 3.5分(2.0M), 3.0分(2.0M), 2.5分(1.5M) |
+| **GitHub Code** | 12.0M | 30% | ≥2 stars(10M), <2 stars(2M) |
+| **Nemotron-CC-Math** | 6.0M | 15% | 4plus(3.0M), 4plus_MIND(1.92M), 3(1.08M) |
 
 ### 2.2 数据目录
 
@@ -107,10 +97,11 @@ base = AutoTokenizer.from_pretrained(
     trust_remote_code=True
 )
 base.save_pretrained("output/qwen3_next_tokenizer")
-# 基础词表: 151643（仅作架构模板）
 ```
 
 ### 3.2 数据采样
+
+**目标**: 从各数据源按配置比例采样，每个桶独立打乱后随机取样。
 
 ```bash
 python scripts/prepare_tokenizer_data.py \
@@ -123,32 +114,32 @@ python scripts/prepare_tokenizer_data.py \
 datasets:
   fineweb_en:
     source: "data/datasets/fineweb/en"
-    samples: 12200000  # 12.2M
+    samples: 12000000
     buckets:
       4.0: {count: 5400000}
       3.5: {count: 2400000}
       3.0: {count: 2400000}
-      2.5: {count: 1800000, sampling_rate: 0.25}
-  
+      2.5: {count: 1800000}
+
   fineweb_zh:
     source: "data/datasets/fineweb/zh"
-    samples: 9800000   # 9.8M
+    samples: 10000000
     buckets:
       4.0: {count: 4500000}
       3.5: {count: 2000000}
       3.0: {count: 2000000}
-      2.5: {count: 1500000, sampling_rate: 0.375}
-  
+      2.5: {count: 1500000}
+
   github_code:
     source: "data/datasets/nick007x/github-code-2025"
-    samples: 12000000  # 12M
+    samples: 12000000
     stars_filter:
       above_2: {count: 10000000}
-      below_2: {count: 2000000, sampling_rate: 0.2}
-  
+      below_2: {count: 2000000}
+
   nemotron_math:
     source: "data/datasets/nvidia/Nemotron-CC-Math-v1"
-    samples: 6000000   # 6M
+    samples: 6000000
     buckets:
       4plus: {count: 3000000}
       4plus_MIND: {count: 1920000}
@@ -157,6 +148,11 @@ datasets:
 random_seed: 42
 output_format: parquet
 ```
+
+**实现要点**:
+- 基于 Datatrove 框架的 `PipelineStep` 实现
+- 每个桶独立处理：读取 → 打乱 → 采样指定数量
+- 使用 `LocalPipelineExecutor` 并行处理
 
 ### 3.3 Tokenizer 训练
 
@@ -173,7 +169,7 @@ python scripts/train_tokenizer.py \
 1. 从模板加载 pretokenizer/normalizer/decoder 配置
 2. 空白初始化，在采样数据上学习 64000 个 BPE 合并规则
 3. 添加 5 个特殊 token（ID 64000-64004）
-4. 配置 eos/pad/bos/unk 映射
+4. 配置 eos/pad/bos/unk 映射（eos=64002, pad=64000, bos/unk=None）
 
 ---
 
@@ -219,48 +215,28 @@ output/tokenizer_64k/
 
 ---
 
-## 5. 参考与实现
+## 5. 实现清单
 
-### 5.1 待实现文件
+### 5.1 文件清单
 
-| 文件 | 说明 | 优先级 |
-|------|------|--------|
-| `config/tokenizer_data.yaml` | 数据采样配置 | P0 |
-| `scripts/prepare_template.py` | 复制 Qwen3-Next 架构 | P1 |
-| `scripts/prepare_tokenizer_data.py` | 多数据源采样 | P0 |
-| `scripts/train_tokenizer.py` | BPE 训练主脚本 | P0 |
+| 文件 | 状态 | 说明 | 技术栈 |
+|------|------|------|--------|
+| `config/tokenizer_data.yaml` | 已设计 | 数据采样配置 | YAML |
+| `scripts/prepare_template.py` | 待实现 | 复制 Qwen3-Next 架构 | transformers |
+| `scripts/prepare_tokenizer_data.py` | 待实现 | 多数据源采样 | datatrove |
+| `scripts/train_tokenizer.py` | 待实现 | BPE 训练主脚本 | tokenizers |
 
 ### 5.2 依赖
 
 ```
 tokenizers>=0.22.0
 transformers>=4.40.0
+datatrove>=0.8.0
 ```
 
 ### 5.3 扩展预留
 
-如需视觉/多模态支持，可添加特殊 token（如 `<|vision_start|>`, `<|image_pad|>` 等），并相应增加 `vocab_size`。
-
----
-
-## 附录：数据采样原理
-
-**确定性采样**: 使用 MD5 哈希确保可复现
-```python
-import hashlib
-
-def should_sample(doc_id: str, seed: int, rate: float) -> bool:
-    if rate >= 1.0:
-        return True
-    h = int.from_bytes(
-        hashlib.md5(f"{seed}_{doc_id}".encode()).digest()[:8], "big"
-    )
-    return h / (2**64) < rate
-```
-
-**FineWeb 分桶逻辑**: 采用左闭右开区间 `[min_score, max_score)`
-- 英文：直接使用原始评分（1.0-5.0）
-- 中文：归一化评分 × 5（0.0-1.0 → 0.0-5.0）
+如需视觉/多模态支持，可添加特殊 token（如 `<|vision_start|>`、`<|image_pad|>` 等），并相应增加 `vocab_size`。
 
 ---
 
