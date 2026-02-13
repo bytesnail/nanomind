@@ -10,11 +10,41 @@ import yaml
 from scripts.prepare_tokenizer_data import (
     SamplingConfig,
     TokenizerDataConfig,
+    compute_doc_hash,
+    create_sample_doc,
     deterministic_sample,
     determine_text_column,
     get_file_row_count,
     load_config,
+    shuffle_samples,
 )
+
+
+class TestComputeDocHash:
+    """文档哈希计算函数的测试。"""
+
+    def test_compute_doc_hash_determinism(self):
+        """相同输入应该产生相同哈希值（确定性）。"""
+        hash1 = compute_doc_hash("doc_123", seed=42)
+        hash2 = compute_doc_hash("doc_123", seed=42)
+        assert hash1 == hash2
+
+    def test_compute_doc_hash_different_seeds(self):
+        """不同种子应该产生不同哈希值。"""
+        hash1 = compute_doc_hash("doc_123", seed=42)
+        hash2 = compute_doc_hash("doc_123", seed=24)
+        assert hash1 != hash2
+
+    def test_compute_doc_hash_different_docs(self):
+        """不同文档应该产生不同哈希值（大概率）。"""
+        hash1 = compute_doc_hash("doc_123", seed=42)
+        hash2 = compute_doc_hash("doc_456", seed=42)
+        assert hash1 != hash2
+
+    def test_compute_doc_hash_returns_int(self):
+        """应该返回整数类型。"""
+        result = compute_doc_hash("doc_123", seed=42)
+        assert isinstance(result, int)
 
 
 class TestDeterministicSample:
@@ -22,31 +52,21 @@ class TestDeterministicSample:
 
     def test_deterministic_sample_always_true_when_target_equals_total(self):
         """当目标数等于总数时，应该总是返回 True。"""
-        assert deterministic_sample("doc1", 10, 10, seed=42) is True
-        assert deterministic_sample("doc2", 100, 100, seed=123) is True
+        doc_hash = compute_doc_hash("doc1", seed=42)
+        assert deterministic_sample(doc_hash, 10, 10) is True
+        doc_hash2 = compute_doc_hash("doc2", seed=123)
+        assert deterministic_sample(doc_hash2, 100, 100) is True
 
     def test_deterministic_sample_always_true_when_target_exceeds_total(self):
         """当目标数超过总数时，应该总是返回 True。"""
-        assert deterministic_sample("doc1", 100, 10, seed=42) is True
+        doc_hash = compute_doc_hash("doc1", seed=42)
+        assert deterministic_sample(doc_hash, 100, 10) is True
 
     def test_deterministic_sample_determinism(self):
         """相同输入应该产生相同结果（确定性）。"""
-        results = [deterministic_sample("doc_123", 50, 100, seed=42) for _ in range(5)]
+        doc_hash = compute_doc_hash("doc_123", seed=42)
+        results = [deterministic_sample(doc_hash, 50, 100) for _ in range(5)]
         assert all(r == results[0] for r in results)
-
-    def test_deterministic_sample_different_seeds(self):
-        """不同种子应该产生不同结果。"""
-        # 虽然单一样本可能相同，但概率极低
-        # 使用多个样本进行统计检验
-        count_42 = sum(
-            deterministic_sample(f"doc_{i}", 50, 100, seed=42) for i in range(1000)
-        )
-        count_24 = sum(
-            deterministic_sample(f"doc_{i}", 50, 100, seed=24) for i in range(1000)
-        )
-        # 两者都应该接近 500，但具体值可能不同
-        assert 400 < count_42 < 600
-        assert 400 < count_24 < 600
 
     def test_deterministic_sample_rate_accuracy(self):
         """采样率应该接近目标比例。"""
@@ -55,7 +75,7 @@ class TestDeterministicSample:
         target = int(total * target_rate)
 
         sampled_count = sum(
-            deterministic_sample(f"doc_{i}", target, total, seed=42)
+            deterministic_sample(compute_doc_hash(f"doc_{i}", seed=42), target, total)
             for i in range(total)
         )
 
@@ -284,3 +304,56 @@ class TestIntegration:
         # 验证各数据集
         assert config.datasets["fineweb_en"].buckets["4.0"] == 5_400_000
         assert config.datasets["github_code"].stars_filter["above_2"] == 10_000_000
+
+
+class TestCreateSampleDoc:
+    """创建样本文档函数的测试。"""
+
+    def test_create_sample_doc_structure(self):
+        """测试返回的文档结构正确。"""
+        doc = create_sample_doc("test text", "fineweb", "4.0")
+        assert doc["text"] == "test text"
+        assert doc["source_dataset"] == "fineweb"
+        assert doc["source_bucket"] == "4.0"
+
+    def test_create_sample_doc_empty_text(self):
+        """测试空文本的情况。"""
+        doc = create_sample_doc("", "github", "main")
+        assert doc["text"] == ""
+        assert doc["source_dataset"] == "github"
+        assert doc["source_bucket"] == "main"
+
+
+class TestShuffleSamples:
+    """样本打乱函数的测试。"""
+
+    def test_shuffle_samples_determinism(self):
+        """相同输入和种子应该产生相同顺序。"""
+        samples = [
+            {"text": f"text_{i}", "source_dataset": "test", "source_bucket": "1.0"}
+            for i in range(100)
+        ]
+        shuffled1 = shuffle_samples(samples, seed=42)
+        shuffled2 = shuffle_samples(samples, seed=42)
+        assert [s["text"] for s in shuffled1] == [s["text"] for s in shuffled2]
+
+    def test_shuffle_samples_different_seeds(self):
+        """不同种子应该产生不同顺序（大概率）。"""
+        samples = [
+            {"text": f"text_{i}", "source_dataset": "test", "source_bucket": "1.0"}
+            for i in range(100)
+        ]
+        shuffled1 = shuffle_samples(samples, seed=42)
+        shuffled2 = shuffle_samples(samples, seed=24)
+        # 打乱后的顺序很可能不同
+        assert [s["text"] for s in shuffled1] != [s["text"] for s in shuffled2]
+
+    def test_shuffle_samples_preserves_all_items(self):
+        """打乱后应该保留所有样本。"""
+        samples = [
+            {"text": f"text_{i}", "source_dataset": "test", "source_bucket": "1.0"}
+            for i in range(50)
+        ]
+        shuffled = shuffle_samples(samples, seed=42)
+        assert len(shuffled) == len(samples)
+        assert set(s["text"] for s in shuffled) == set(s["text"] for s in samples)
