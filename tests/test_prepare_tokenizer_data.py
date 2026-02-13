@@ -10,18 +10,18 @@ import pytest
 import yaml
 
 from scripts.prepare_tokenizer_data import (
-    DocHash,
-    SampleDoc,
     SamplingConfig,
+    SamplingInfo,
     StreamingParquetWriter,
     TokenizerDataConfig,
     compute_doc_hash,
     create_sample_doc,
     determine_text_column,
-    deterministic_sample,
     get_file_row_count,
     load_config,
     save_sampling_info,
+    select_top_k_document_hashes,
+    stream_file_rows,
 )
 
 
@@ -105,42 +105,6 @@ class TestComputeDocHash:
         assert isinstance(result, int)
         assert result >= 0
         assert result < 2**64
-
-
-class TestDeterministicSample:
-    """确定性采样函数的测试。"""
-
-    def test_deterministic_sample_always_true_when_target_equals_total(self) -> None:
-        """当目标数等于总数时，应该总是返回 True。"""
-        doc_hash = compute_doc_hash("doc1", seed=42)
-        assert deterministic_sample(doc_hash, 10, 10) is True
-        doc_hash2 = compute_doc_hash("doc2", seed=123)
-        assert deterministic_sample(doc_hash2, 100, 100) is True
-
-    def test_deterministic_sample_always_true_when_target_exceeds_total(self) -> None:
-        """当目标数超过总数时，应该总是返回 True。"""
-        doc_hash = compute_doc_hash("doc1", seed=42)
-        assert deterministic_sample(doc_hash, 100, 10) is True
-
-    def test_deterministic_sample_determinism(self) -> None:
-        """相同输入应该产生相同结果（确定性）。"""
-        doc_hash = compute_doc_hash("doc_123", seed=42)
-        results = [deterministic_sample(doc_hash, 50, 100) for _ in range(5)]
-        assert all(r == results[0] for r in results)
-
-    def test_deterministic_sample_rate_accuracy(self) -> None:
-        """采样率应该接近目标比例（允许5%误差）。"""
-        target_rate = 0.3
-        total = 10000
-        target = int(total * target_rate)
-
-        sampled_count = sum(
-            deterministic_sample(compute_doc_hash(f"doc_{i}", seed=42), target, total)
-            for i in range(total)
-        )
-
-        actual_rate = sampled_count / total
-        assert abs(actual_rate - target_rate) < 0.05
 
 
 class TestDetermineTextColumn:
@@ -279,66 +243,22 @@ class TestSamplingConfig:
         assert config.get_all_counts() == {}
 
 
-def _assert_dict_fields(
-    data: dict[str, Any],
-    expected: dict[str, Any],
-) -> None:
-    """Helper: 断言字典字段值与期望值匹配。"""
-    for key, value in expected.items():
-        assert data[key] == value, f"Field '{key}' mismatch: {data[key]} != {value}"
-
-
 class TestCreateSampleDoc:
     """创建样本文档函数的测试。"""
 
     def test_create_sample_doc_structure(self) -> None:
         """测试返回的文档结构正确。"""
-        doc: SampleDoc = create_sample_doc("test text", "fineweb", "4.0")
-        _assert_dict_fields(
-            doc,
-            {"text": "test text", "source_dataset": "fineweb", "source_bucket": "4.0"},
-        )
+        doc = create_sample_doc("test text", "fineweb", "4.0")
+        assert doc["text"] == "test text"
+        assert doc["source_dataset"] == "fineweb"
+        assert doc["source_bucket"] == "4.0"
 
     def test_create_sample_doc_empty_text(self) -> None:
         """测试空文本的情况。"""
-        doc: SampleDoc = create_sample_doc("", "github", "main")
-        _assert_dict_fields(
-            doc, {"text": "", "source_dataset": "github", "source_bucket": "main"}
-        )
-
-
-class TestDocHash:
-    """DocHash 命名元组的测试。"""
-
-    def test_dochash_creation(self) -> None:
-        """测试 DocHash 可以正确创建。"""
-        dh = DocHash(
-            hash_value=12345,
-            doc_id="test_doc",
-            file_path=Path("/tmp/test.parquet"),
-            row_index=42,
-        )
-        assert dh.hash_value == 12345
-        assert dh.doc_id == "test_doc"
-        assert dh.file_path == Path("/tmp/test.parquet")
-        assert dh.row_index == 42
-
-    def test_dochash_unpacking(self) -> None:
-        """测试 DocHash 可以解包。"""
-        dh = DocHash(1, "doc", Path("file"), 0)
-        h, d, f, r = dh
-        assert h == 1
-        assert d == "doc"
-        assert f == Path("file")
-        assert r == 0
-
-
-def _assert_parquet_schema(table: pa.Table, expected_rows: int = 1) -> None:
-    """Helper: 断言 Parquet 表结构正确。"""
-    assert "text" in table.column_names
-    assert "source_dataset" in table.column_names
-    assert "source_bucket" in table.column_names
-    assert table.num_rows == expected_rows
+        doc = create_sample_doc("", "github", "main")
+        assert doc["text"] == ""
+        assert doc["source_dataset"] == "github"
+        assert doc["source_bucket"] == "main"
 
 
 class TestStreamingParquetWriter:
@@ -385,7 +305,10 @@ class TestStreamingParquetWriter:
 
         files = list(output_dir.glob("*.parquet"))
         table = pq.read_table(files[0])
-        _assert_parquet_schema(table, expected_rows=1)
+        assert "text" in table.column_names
+        assert "source_dataset" in table.column_names
+        assert "source_bucket" in table.column_names
+        assert table.num_rows == 1
         assert table.column("text").to_pylist() == ["hello"]
 
     def test_writer_context_manager_closes_properly(self, tmp_path: Path) -> None:
@@ -399,13 +322,150 @@ class TestStreamingParquetWriter:
         assert len(files) == 1
 
 
+class TestStreamFileRows:
+    """流式文件读取函数的测试。"""
+
+    def test_stream_file_rows_basic(self, tmp_path: Path) -> None:
+        """测试基本流式读取功能。"""
+        # 创建测试文件
+        columns = {"text": [f"text_{i}" for i in range(100)]}
+        table = pa.table(columns)
+        file_path = tmp_path / "test.parquet"
+        pq.write_table(table, file_path)
+
+        # 流式读取
+        rows = list(stream_file_rows(file_path, "text", batch_size=10))
+
+        assert len(rows) == 100
+        for i, (idx, text) in enumerate(rows):
+            assert idx == i
+            assert text == f"text_{i}"
+
+    def test_stream_file_rows_empty_file(self, tmp_path: Path) -> None:
+        """测试空文件的流式读取。"""
+        columns = {"text": []}
+        table = pa.table(columns)
+        file_path = tmp_path / "empty.parquet"
+        pq.write_table(table, file_path)
+
+        rows = list(stream_file_rows(file_path, "text"))
+        assert len(rows) == 0
+
+    def test_stream_file_rows_large_batch_size(self, tmp_path: Path) -> None:
+        """测试批次大小大于文件大小时的情况。"""
+        columns = {"text": [f"text_{i}" for i in range(5)]}
+        table = pa.table(columns)
+        file_path = tmp_path / "test.parquet"
+        pq.write_table(table, file_path)
+
+        rows = list(stream_file_rows(file_path, "text", batch_size=1000))
+        assert len(rows) == 5
+
+
+class TestStreamFileRowsIndices:
+    """带索引筛选的流式读取函数测试。"""
+
+    def test_stream_with_indices_basic(self, tmp_path: Path) -> None:
+        """测试基本索引筛选功能。"""
+        columns = {"text": [f"text_{i}" for i in range(10)]}
+        table = pa.table(columns)
+        file_path = tmp_path / "test.parquet"
+        pq.write_table(table, file_path)
+
+        indices = {1, 3, 5, 7}
+        rows = list(stream_file_rows(file_path, "text", batch_size=3, indices=indices))
+
+        assert len(rows) == 4
+        assert {idx for idx, _ in rows} == indices
+
+    def test_stream_with_indices_empty_indices(self, tmp_path: Path) -> None:
+        """测试空索引集合的情况。"""
+        columns = {"text": [f"text_{i}" for i in range(10)]}
+        table = pa.table(columns)
+        file_path = tmp_path / "test.parquet"
+        pq.write_table(table, file_path)
+
+        rows = list(stream_file_rows(file_path, "text", indices=set()))
+        assert len(rows) == 0
+
+    def test_stream_with_indices_out_of_range(self, tmp_path: Path) -> None:
+        """测试索引超出范围的情况（应忽略）。"""
+        columns = {"text": [f"text_{i}" for i in range(5)]}
+        table = pa.table(columns)
+        file_path = tmp_path / "test.parquet"
+        pq.write_table(table, file_path)
+
+        indices = {1, 100}  # 100 超出范围
+        rows = list(stream_file_rows(file_path, "text", indices=indices))
+
+        assert len(rows) == 1
+        assert rows[0][0] == 1
+
+
+class TestSelectTopKDocumentHashes:
+    """Top-K 文档哈希选择函数测试。"""
+
+    def test_select_top_k_basic(self, tmp_path: Path) -> None:
+        """测试基本 Top-K 选择功能。"""
+        # 创建测试文件
+        for i in range(3):
+            columns = {"text": [f"file{i}_text{j}" for j in range(10)]}
+            table = pa.table(columns)
+            pq.write_table(table, tmp_path / f"file_{i}.parquet")
+
+        files = sorted(tmp_path.glob("*.parquet"))
+        result = select_top_k_document_hashes(
+            files, "test_bucket", seed=42, target_count=5
+        )
+
+        assert isinstance(result, dict)
+        assert len(result) <= 3  # 最多 3 个文件
+        total_indices = sum(len(indices) for indices in result.values())
+        assert total_indices == 5
+
+    def test_select_top_k_target_exceeds_total(self, tmp_path: Path) -> None:
+        """测试目标数超过总数的情况。"""
+        columns = {"text": [f"text_{i}" for i in range(5)]}
+        table = pa.table(columns)
+        pq.write_table(table, tmp_path / "small.parquet")
+
+        files = [tmp_path / "small.parquet"]
+        result = select_top_k_document_hashes(
+            files, "test_bucket", seed=42, target_count=100
+        )
+
+        total_indices = sum(len(indices) for indices in result.values())
+        assert total_indices == 5  # 应返回全部
+
+    def test_select_top_k_empty_files(self, tmp_path: Path) -> None:
+        """测试空文件列表的情况。"""
+        result = select_top_k_document_hashes(
+            [], "test_bucket", seed=42, target_count=10
+        )
+        assert result == {}
+
+    def test_select_top_k_determinism(self, tmp_path: Path) -> None:
+        """测试 Top-K 选择的确定性。"""
+        columns = {"text": [f"text_{i}" for i in range(20)]}
+        table = pa.table(columns)
+        pq.write_table(table, tmp_path / "test.parquet")
+
+        files = [tmp_path / "test.parquet"]
+        result1 = select_top_k_document_hashes(
+            files, "test_bucket", seed=42, target_count=5
+        )
+        result2 = select_top_k_document_hashes(
+            files, "test_bucket", seed=42, target_count=5
+        )
+
+        assert result1 == result2
+
+
 class TestSaveSamplingInfo:
     """保存采样信息函数的测试。"""
 
     def test_save_sampling_info_creates_file(self, tmp_path: Path) -> None:
         """测试保存采样信息创建 JSON 文件。"""
-        from scripts.prepare_tokenizer_data import SamplingInfo
-
         info = SamplingInfo(
             total_requested=1000,
             total_sampled=950,
@@ -427,19 +487,3 @@ class TestSaveSamplingInfo:
         assert data["total_sampled"] == 950
         assert data["random_seed"] == 42
         assert "sources" in data
-
-
-class TestSampleDoc:
-    """SampleDoc 字典子类的测试。"""
-
-    def test_sampledoc_is_dict(self) -> None:
-        """测试 SampleDoc 是 dict 的子类。"""
-        doc = SampleDoc(text="hello", source_dataset="ds", source_bucket="4.0")
-        assert isinstance(doc, dict)
-        assert doc["text"] == "hello"
-
-    def test_sampledoc_from_create_function(self) -> None:
-        """测试 create_sample_doc 返回 SampleDoc。"""
-        doc = create_sample_doc("text", "dataset", "bucket")
-        assert isinstance(doc, SampleDoc)
-        assert doc["source_dataset"] == "dataset"
