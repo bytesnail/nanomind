@@ -1,0 +1,54 @@
+datasets:
+  fineweb_en:
+    name: "fineweb_edu_en"
+    source: "data/datasets/fineweb/en"
+    samples: 12000000
+    buckets:
+      4.0:
+        count: 5400000
+      3.5:
+        count: 2400000
+      3.0:
+        count: 2400000
+      2.5:
+        count: 1800000
+
+  fineweb_zh:
+    name: "fineweb_edu_zh"
+    source: "data/datasets/fineweb/zh"
+    samples: 10000000
+    buckets:
+      4.0:
+        count: 4500000
+      3.5:
+        count: 2000000
+      3.0:
+        count: 2000000
+      2.5:
+        count: 1500000
+
+  github_code:
+    name: "github_code"
+    source: "data/datasets/nick007x/github-code-2025"
+    samples: 12000000
+    stars_filter:
+      above_2:
+        count: 10000000
+      below_2:
+        count: 2000000
+
+  nemotron_math:
+    name: "nemotron_cc_math"
+    source: "data/datasets/nvidia/Nemotron-CC-Math-v1"
+    samples: 6000000
+    buckets:
+      4plus:
+        count: 3000000
+      4plus_MIND:
+        count: 1920000
+      3:
+        count: 1080000
+
+random_seed: 42
+output_format: "parquet"
+output_dir: "data/datasets/nanomind_tokenizer"
