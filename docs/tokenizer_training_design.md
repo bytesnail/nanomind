@@ -6,6 +6,24 @@
 
 ---
 
+## 目录
+
+1. [核心配置](#1-核心配置)
+   - [1.1 词表结构](#11-词表结构)
+   - [1.2 特殊 Token](#12-特殊-token)
+2. [训练数据](#2-训练数据)
+   - [2.1 数据配比](#21-数据配比)
+   - [2.2 数据目录](#22-数据目录)
+3. [训练流程](#3-训练流程)
+   - [3.1 准备模板](#31-准备模板)
+   - [3.2 数据采样](#32-数据采样)
+   - [3.3 Tokenizer 训练](#33-tokenizer-训练)
+4. [验证与输出](#4-验证与输出)
+5. [实现清单](#5-实现清单)
+6. [附录](#6-附录)
+
+---
+
 ## 1. 核心配置
 
 ### 1.1 词表结构
@@ -17,7 +35,7 @@
 | **特殊 tokens** | 5 | 手动定义（ID 64000-64004） |
 | **算法** | BPE | Byte Pair Encoding |
 | **BPE 最小词频** | 2 | min_frequency |
-| **基础架构** | Qwen3-Next | 仅复制配置（pretokenizer/normalizer/decoder），不继承词表 |
+| **基础架构** | Qwen3-Next | 复制 pretokenizer/normalizer/decoder，不继承词表 |
 
 ### 1.2 特殊 Token
 
@@ -29,7 +47,11 @@
 | 64003 | `<|think|>` | 推理开始 | 特殊标记 |
 | 64004 | `<|/think|>` | 推理结束 | 特殊标记 |
 
-> **注意**: `bos_token` 和 `unk_token` 设为 `None`
+**模型配置**:
+- `bos_token` = `None`
+- `eos_token` = `<|im_end|>` (64002)
+- `pad_token` = `<|endoftext|>` (64000)
+- `unk_token` = `None`
 
 **对话格式示例**:
 ```
@@ -44,14 +66,18 @@
 
 ## 2. 训练数据
 
-### 2.1 数据配比（40M 总计）
+### 2.1 数据配比
+
+总计 **40M** 样本，多领域混合：
 
 | 数据集 | 样本数 | 占比 | 明细 |
 |--------|--------|------|------|
-| **FineWeb-EN** | 12.0M | 30% | 4.0分(5.4M), 3.5分(2.4M), 3.0分(2.4M), 2.5分(1.8M) |
-| **FineWeb-ZH** | 10.0M | 25% | 4.0分(4.5M), 3.5分(2.0M), 3.0分(2.0M), 2.5分(1.5M) |
-| **GitHub Code** | 12.0M | 30% | ≥2 stars(10M), <2 stars(2M) |
-| **Nemotron-CC-Math** | 6.0M | 15% | 4plus(3.0M), 4plus_MIND(1.92M), 3(1.08M) |
+| **FineWeb-EN** | 12.0M | 30% | 4.0分: 5.4M, 3.5分: 2.4M, 3.0分: 2.4M, 2.5分: 1.8M |
+| **FineWeb-ZH** | 10.0M | 25% | 4.0分: 4.5M, 3.5分: 2.0M, 3.0分: 2.0M, 2.5分: 1.5M |
+| **GitHub Code** | 12.0M | 30% | ≥2 stars: 10M, <2 stars: 2M |
+| **Nemotron-CC-Math** | 6.0M | 15% | 4plus: 3.0M, 4plus_MIND: 1.92M, 3: 1.08M |
+
+> 数据采样配置详见 [config/tokenizer_data.yaml](#tokenizer_data_yaml)。
 
 ### 2.2 数据目录
 
@@ -68,14 +94,14 @@ data/datasets/
     ├── 3/, 4plus/, 4plus_MIND/
 ```
 
+> FineWeb 分桶预处理详见 [数据重组设计文档](fineweb_edu_data_reorganization_design.md)
+
 **训练输入**（采样脚本输出）：
 ```
 data/datasets/nanomind_tokenizer/
 ├── train-{idx:05d}-of-{total:05d}.parquet
-└── sampling_info.json            # 采样元信息（种子、配比、统计）
+└── sampling_info.json            # 采样元信息
 ```
-
-> FineWeb 分桶预处理详见 [数据重组设计文档](fineweb_edu_data_reorganization_design.md)
 
 ---
 
@@ -101,7 +127,7 @@ base.save_pretrained("output/qwen3_next_tokenizer")
 
 ### 3.2 数据采样
 
-**目标**: 从各数据源按配置比例采样，每个桶独立打乱后随机取样。
+**目标**: 从各数据源按配置比例采样 40M 样本。
 
 ```bash
 python scripts/prepare_tokenizer_data.py \
@@ -110,6 +136,7 @@ python scripts/prepare_tokenizer_data.py \
 ```
 
 **采样配置** (`config/tokenizer_data.yaml`):
+
 ```yaml
 datasets:
   fineweb_en:
@@ -149,10 +176,25 @@ random_seed: 42
 output_format: parquet
 ```
 
-**实现要点**:
-- 基于 Datatrove 框架的 `PipelineStep` 实现
-- 每个桶独立处理：读取 → 打乱 → 采样指定数量
-- 使用 `LocalPipelineExecutor` 并行处理
+#### 内存与性能优化
+
+**数据规模**:
+- FineWeb 单个桶可能包含 **~100 个文件，每文件 4GB+**（总计 400GB/桶）
+- 处理 40M 样本需考虑内存峰值和 I/O 吞吐量
+
+**采样实现要点**:
+
+| 优化项 | 策略 |
+|--------|------|
+| **分块读取** | 单文件流式读取，避免全量加载 |
+| **桶内分批** | 每个桶按文件或子批次独立打乱采样 |
+| **流式写入** | 边采样边写入 Parquet，不累积全部数据 |
+| **并行处理** | 基于 Datatrove `LocalPipelineExecutor` 多进程并行 |
+
+**推荐配置**:
+- `workers`: 32（本地并行进程数）
+- `tasks`: 2500（数据分片数，应大于 workers）
+- 每批次处理后显式调用 `gc.collect()`
 
 ### 3.3 Tokenizer 训练
 
@@ -169,7 +211,19 @@ python scripts/train_tokenizer.py \
 1. 从模板加载 pretokenizer/normalizer/decoder 配置
 2. 空白初始化，在采样数据上学习 64000 个 BPE 合并规则
 3. 添加 5 个特殊 token（ID 64000-64004）
-4. 配置 eos/pad/bos/unk 映射（eos=64002, pad=64000, bos/unk=None）
+4. 配置 eos/pad/bos/unk 映射
+
+#### 训练内存优化
+
+| 阶段 | 内存瓶颈 | 优化策略 |
+|------|----------|----------|
+| **数据迭代** | 40M 文本加载 | 使用生成器流式迭代，batch_size=10000 |
+| **BPE 训练** | 词频统计 + 合并队列 | 使用 `tokenizers` 库的增量训练，控制并发 |
+| **最终保存** | 完整词表序列化 | 直接写入磁盘，不驻留内存 |
+
+**训练时间估算**（参考值）:
+- 40M 样本 × 平均 500 tokens ≈ 20B tokens
+- 64K BPE 训练：预计 4-8 小时（32 核 CPU）
 
 ---
 
@@ -177,9 +231,9 @@ python scripts/train_tokenizer.py \
 
 ### 4.1 自动验证
 
-训练时添加 `--validate` 参数，自动检查：
+训练时添加 `--validate` 参数，检查：
 - 词表大小 = 64005
-- 特殊 token 存在且 ID 正确（64000-64004）
+- 特殊 token ID 正确（64000-64004）
 - 编解码一致性
 
 ### 4.2 手动验证
@@ -209,7 +263,6 @@ output/tokenizer_64k/
 ├── tokenizer.json              # 词表与合并规则
 ├── tokenizer_config.json       # Tokenizer配置
 ├── special_tokens_map.json     # 特殊token映射
-├── training_info.json          # 训练元信息
 └── vocab.txt                   # 可读词汇表
 ```
 
@@ -217,27 +270,34 @@ output/tokenizer_64k/
 
 ## 5. 实现清单
 
-### 5.1 文件清单
+| 文件 | 说明 | 依赖 |
+|------|------|------|
+| `config/tokenizer_data.yaml` | 数据采样配置 | - |
+| `scripts/prepare_template.py` | 复制 Qwen3-Next 架构 | transformers |
+| `scripts/prepare_tokenizer_data.py` | 多数据源采样 | datatrove |
+| `scripts/train_tokenizer.py` | BPE 训练主脚本 | tokenizers |
 
-| 文件 | 状态 | 说明 | 技术栈 |
-|------|------|------|--------|
-| `config/tokenizer_data.yaml` | 已设计 | 数据采样配置 | YAML |
-| `scripts/prepare_template.py` | 待实现 | 复制 Qwen3-Next 架构 | transformers |
-| `scripts/prepare_tokenizer_data.py` | 待实现 | 多数据源采样 | datatrove |
-| `scripts/train_tokenizer.py` | 待实现 | BPE 训练主脚本 | tokenizers |
-
-### 5.2 依赖
-
+**依赖版本要求**:
 ```
 tokenizers>=0.22.0
 transformers>=4.40.0
 datatrove>=0.8.0
 ```
 
-### 5.3 扩展预留
+---
+
+## 6. 附录
+
+### 6.1 扩展预留
 
 如需视觉/多模态支持，可添加特殊 token（如 `<|vision_start|>`、`<|image_pad|>` 等），并相应增加 `vocab_size`。
 
+### 6.2 相关文档
+
+- [数据重组设计](fineweb_edu_data_reorganization_design.md)
+- [FineWeb-Edu 论文](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu)
+- [Datatrove 文档](https://github.com/huggingface/datatrove)
+
 ---
 
-*相关文档: [数据重组设计](fineweb_edu_data_reorganization_design.md)*
+*最后更新: 2026-02-13*
