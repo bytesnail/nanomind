@@ -619,8 +619,11 @@ class StreamingParquetWriter:
         temp_filename = f"{self.prefix}-{self.file_idx:05d}.part"
         temp_path = self.output_dir / temp_filename
 
+        # 只在创建新文件时才追加到 output_files，避免重复
+        if self._rows_in_current_file == 0:
+            self.output_files.append(temp_path)
+
         pq.write_table(table, temp_path, compression=COMPRESSION)
-        self.output_files.append(temp_path)
 
         logger.info(f"  写入批次 {self.file_idx} ({len(self.current_batch):,} 行)")
 
