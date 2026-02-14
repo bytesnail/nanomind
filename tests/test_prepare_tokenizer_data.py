@@ -1,4 +1,4 @@
-"""Tests for prepare_tokenizer_data module (optimized version)."""
+"""Tests for prepare_tokenizer_data module."""
 
 import json
 from pathlib import Path
@@ -16,6 +16,8 @@ from scripts.prepare_tokenizer_data import (
     SourceTagger,
     TokenizerDataConfig,
     TokenizerDataWriter,
+    calculate_tasks,
+    find_bucket_dir,
     compute_doc_hash,
     count_total_rows_fast,
     determine_text_column,
@@ -345,3 +347,35 @@ class TestSaveSamplingInfo:
         with open(output_path) as f:
             data = json.load(f)
         assert data["total_requested"] == 1000
+
+
+class TestCalculateTasks:
+    def test_explicit_tasks_value(self):
+        assert calculate_tasks(tasks=10, workers=4, item_count=1000) == 10
+
+    def test_auto_with_item_count(self):
+        assert calculate_tasks(tasks=0, workers=4, item_count=50000) == 4
+        assert calculate_tasks(tasks=0, workers=8, item_count=50000) == 5
+        assert calculate_tasks(tasks=0, workers=16, item_count=5000) == 1
+
+    def test_auto_without_item_count(self):
+        assert calculate_tasks(tasks=0, workers=8) == 8
+        assert calculate_tasks(tasks=0, workers=1) == 1
+
+
+class TestFindBucketDir:
+    def test_finds_bucket_dir(self, tmp_path):
+        bucket_dir = tmp_path / "4.0"
+        bucket_dir.mkdir()
+        file_path = bucket_dir / "data.parquet"
+
+        result = find_bucket_dir([file_path], "4.0")
+        assert result == bucket_dir
+
+    def test_finds_nested_bucket_dir(self, tmp_path):
+        bucket_dir = tmp_path / "fineweb" / "en" / "4.0"
+        bucket_dir.mkdir(parents=True)
+        file_path = bucket_dir / "data.parquet"
+
+        result = find_bucket_dir([file_path], "4.0")
+        assert result == bucket_dir

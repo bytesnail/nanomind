@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""基于 Datatrove 的 Tokenizer 训练数据准备脚本 (优化版 v2).
+"""基于 Datatrove 的 Tokenizer 训练数据准备脚本 (优化版 v3).
 
 核心优化:
 1. 两遍处理 - 第一遍计算采样索引，第二遍流式读取
@@ -7,12 +7,14 @@
 3. 正确利用 Datatrove 的并行架构 - 采样在 pipeline 外部完成
 4. 针对 32 核/250GB/400MB/s 配置优化默认参数
 
-修复内容 (v2):
-- 修复 IndexFilter 无法正常工作的 BUG (ParquetReader 不设置 row_idx)
-- 修复 _process_full 返回值不正确的问题
-- 修复文件路径传递问题，确保 ParquetReader 只读取指定文件
-- 添加并行哈希计算优化
-- 统一代码风格与 src/data_processing 模块保持一致
+修复内容 (v3):
+- 修复 TokenizerDataWriter.run() 返回类型，符合 datatrove 约定
+- 添加 jemalloc 内存分配器支持，解决 Linux ptmalloc2 内存泄漏
+- 简化 adapter 实现，使用 ParquetReader 内置 add_file_path 参数
+- 提取 _process_full 和 _process_sampled 公共代码
+- 统一 tasks 计算逻辑
+- 添加定期 gc.collect() 防止内存碎片累积
+- 优化默认参数配置
 
 设计原则:
 - 采样计算与数据读取分离
@@ -23,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import heapq
 import json
@@ -43,6 +46,12 @@ from datatrove.pipeline.base import PipelineStep
 from datatrove.pipeline.readers import ParquetReader
 from tqdm import tqdm
 
+# 启用 jemalloc 以解决 Linux ptmalloc2 内存泄漏问题
+# 参考: https://github.com/huggingface/datatrove/issues/347
+_JEMALLOC_PATH = "/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
+if os.path.exists(_JEMALLOC_PATH) and "LD_PRELOAD" not in os.environ:
+    os.environ.setdefault("LD_PRELOAD", _JEMALLOC_PATH)
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 logging.basicConfig(
@@ -52,22 +61,19 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path("config/tokenizer_data.yaml")
 
-# 针对 32核/250GB/400MB/s 优化的默认值
 CPU_COUNT = os.cpu_count() or 32
-DEFAULT_WORKERS = min(16, CPU_COUNT)  # 降低进程数，减少上下文切换
-DEFAULT_TASKS = -1  # -1 表示自动根据文件数设置
-DEFAULT_MAX_ROWS = 1_000_000  # 每文件100万行，减少小文件
-DEFAULT_BATCH_SIZE = 100_000  # 10万行缓冲区匹配400MB/s磁盘带宽
+DEFAULT_WORKERS = min(16, CPU_COUNT)
+DEFAULT_TASKS = -1
+DEFAULT_MAX_ROWS = 500_000
+DEFAULT_BATCH_SIZE = 50_000
 COMPRESSION = "zstd"
-RANDOMIZE_START_DURATION = 5  # 随机启动延迟，避免系统过载
+RANDOMIZE_START_DURATION = 5
 
 HASH_MODULUS = 2**64
 
 
 @dataclass
 class SamplingConfig:
-    """单个数据源的采样配置。"""
-
     name: str
     source: Path
     samples: int
@@ -75,7 +81,6 @@ class SamplingConfig:
     stars_filter: dict[str, int] = field(default_factory=dict)
 
     def get_all_counts(self) -> dict[str, int]:
-        """获取所有分桶的样本数。"""
         if self.buckets:
             return self.buckets
         if self.stars_filter:
@@ -85,8 +90,6 @@ class SamplingConfig:
 
 @dataclass
 class TokenizerDataConfig:
-    """Tokenizer 数据准备的整体配置。"""
-
     datasets: dict[str, SamplingConfig]
     random_seed: int
     output_format: str
@@ -95,8 +98,6 @@ class TokenizerDataConfig:
 
 @dataclass
 class SamplingInfo:
-    """采样信息统计。"""
-
     total_requested: int
     total_sampled: int
     sources: dict[str, dict[str, Any]]
@@ -104,7 +105,6 @@ class SamplingInfo:
 
 
 def load_config(config_path: Path) -> TokenizerDataConfig:
-    """从 YAML 文件加载采样配置。"""
     if not config_path.exists():
         raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
@@ -146,7 +146,6 @@ def compute_doc_hash(doc_id: str, seed: int) -> int:
 
 
 def determine_text_column(dataset_name: str) -> str:
-    """根据数据集名称确定文本列名。"""
     if "github" in dataset_name.lower():
         return "content"
     return "text"
@@ -155,20 +154,7 @@ def determine_text_column(dataset_name: str) -> str:
 def create_row_index_adapter(
     text_key: str = "text", id_key: str = "id"
 ) -> Callable[..., dict]:
-    """创建一个 adapter，它会将 row_idx 添加到 metadata 中。
-
-    这是修复 IndexFilter BUG 的关键：ParquetReader 默认不设置 row_idx，
-    我们需要通过自定义 adapter 来添加它。
-
-    Args:
-        text_key: 文本列名
-        id_key: ID 列名
-
-    Returns:
-        adapter 函数
-    """
-
-    def adapter(_self, data: dict, path: str, id_in_file: int | str) -> dict:
+    def adapter(_self: Any, data: dict, path: str, id_in_file: int | str) -> dict:
         metadata = data.pop("metadata", {})
         if isinstance(metadata, str):
             try:
@@ -179,6 +165,7 @@ def create_row_index_adapter(
             metadata = {"metadata": metadata}
 
         metadata["row_idx"] = id_in_file
+        metadata["file_path"] = path
 
         return {
             "text": data.pop(text_key, ""),
@@ -190,30 +177,30 @@ def create_row_index_adapter(
     return adapter
 
 
+def find_bucket_dir(files: list[Path], bucket_name: str) -> Path:
+    bucket_dir = files[0].parent
+    while bucket_dir.name != bucket_name and bucket_dir.parent != bucket_dir:
+        bucket_dir = bucket_dir.parent
+    return bucket_dir
+
+
+def calculate_tasks(tasks: int, workers: int, item_count: int | None = None) -> int:
+    if tasks > 0:
+        return tasks
+    if item_count is not None and item_count > 0:
+        return max(1, min(workers, item_count // 10000))
+    return max(1, workers)
+
+
 def precompute_sampling_indices(
     files: list[Path],
     bucket_name: str,
     seed: int,
     target_count: int,
 ) -> dict[Path, set[int]]:
-    """预先计算需要采样的文件行索引。
-
-    两遍处理的第一遍：只计算哈希，不读取文档内容。
-    内存使用: O(target_count * 16 bytes)，约 80MB 用于 500万样本。
-
-    Args:
-        files: Parquet 文件列表
-        bucket_name: 桶名称（用于生成文档ID）
-        seed: 随机种子
-        target_count: 目标采样数
-
-    Returns:
-        文件路径到行索引集合的映射
-    """
     if not files:
         return {}
 
-    # 使用 (hash, file_idx, row_idx) 元组，避免存储 Path 和 Document
     max_heap: list[tuple[int, int, int]] = []
     file_list = list(files)
     total_scanned = 0
@@ -240,7 +227,6 @@ def precompute_sampling_indices(
         except Exception as e:
             logger.warning(f"处理文件失败 {fp}: {e}")
 
-    # 转换为文件→索引集合映射
     result: dict[Path, set[int]] = {}
     for _, file_idx, row_idx in max_heap:
         result.setdefault(file_list[file_idx], set()).add(row_idx)
@@ -253,18 +239,15 @@ def precompute_sampling_indices(
 
 
 class IndexFilter(PipelineStep):
-    """根据预计算的索引过滤文档。
-
-    配合 precompute_sampling_indices 使用，实现真正的流式处理。
-    """
-
     name = "Index Filter"
     type = "🎯 - FILTER"
 
     def __init__(self, indices: dict[Path, set[int]]):
         super().__init__()
-        # 将 Path 键转换为字符串以支持比较
-        self.indices = {str(k): v for k, v in indices.items()}
+        self.indices: dict[str, set[int]] = {}
+        for k, v in indices.items():
+            self.indices[str(k)] = v
+            self.indices[k.name] = v
 
     def run(
         self,
@@ -283,8 +266,6 @@ class IndexFilter(PipelineStep):
 
 
 class SourceTagger(PipelineStep):
-    """为文档添加来源标签。"""
-
     name = "Source Tagger"
     type = "🏷️ - TAGGER"
 
@@ -307,14 +288,6 @@ class SourceTagger(PipelineStep):
 
 
 class TokenizerDataWriter(PipelineStep):
-    """Tokenizer 数据写入器 - 优化的流式写入。
-
-    优化点:
-    1. 更大的缓冲区 (50K) 匹配磁盘带宽
-    2. 避免重复读取已写入文件
-    3. 批量写入减少 IO 次数
-    """
-
     name = "Tokenizer Data Writer"
     type = "💾 - WRITER"
 
@@ -370,8 +343,9 @@ class TokenizerDataWriter(PipelineStep):
         data: Iterator[Document],
         rank: int = 0,
         world_size: int = 1,  # noqa: ARG002
-    ) -> int:
+    ) -> None:
         batch: list[dict] = []
+        batch_count = 0
 
         for doc in data:
             batch.append(
@@ -385,14 +359,17 @@ class TokenizerDataWriter(PipelineStep):
             if len(batch) >= self.buffer_size:
                 self._write_batch(batch, rank=rank)
                 batch = []
+                batch_count += 1
+                if batch_count % 10 == 0:
+                    gc.collect()
 
         if batch:
             self._write_batch(batch, rank=rank)
 
+        gc.collect()
         logger.info(
             f"写入完成: {self._total_written:,} 行到 {self._file_counter + 1} 个文件"
         )
-        return self._total_written
 
     def get_total_written(self) -> int:
         return self._total_written
@@ -497,15 +474,7 @@ def _process_full(
     text_column: str,
     total_rows: int,
 ) -> int:
-    """全量处理模式 - 所有文档都通过。
-
-    Returns:
-        处理的文档数量
-    """
-    bucket_dir = files[0].parent
-    while bucket_dir.name != bucket_name and bucket_dir.parent != bucket_dir:
-        bucket_dir = bucket_dir.parent
-
+    bucket_dir = find_bucket_dir(files, bucket_name)
     row_idx_adapter = create_row_index_adapter(text_column)
 
     pipeline = [
@@ -524,8 +493,7 @@ def _process_full(
         ),
     ]
 
-    actual_tasks = tasks if tasks > 0 else min(len(files), workers)
-    actual_tasks = max(1, actual_tasks)
+    actual_tasks = calculate_tasks(tasks, workers, len(files))
 
     executor = LocalPipelineExecutor(
         pipeline=pipeline,
@@ -536,7 +504,6 @@ def _process_full(
     )
 
     executor.run()
-
     return total_rows
 
 
@@ -553,11 +520,6 @@ def _process_sampled(
     buffer_size: int,
     text_column: str,
 ) -> int:
-    """采样处理模式 - 两遍处理：预计算索引 + 流式读取。
-
-    Returns:
-        采样的文档数量
-    """
     indices = precompute_sampling_indices(
         files=files,
         bucket_name=bucket_name,
@@ -572,10 +534,7 @@ def _process_sampled(
     selected_count = sum(len(v) for v in indices.values())
     logger.info(f"  [{bucket_name}] 已选择 {selected_count:,} 个索引，开始流式读取...")
 
-    bucket_dir = files[0].parent
-    while bucket_dir.name != bucket_name and bucket_dir.parent != bucket_dir:
-        bucket_dir = bucket_dir.parent
-
+    bucket_dir = find_bucket_dir(files, bucket_name)
     row_idx_adapter = create_row_index_adapter(text_column)
 
     pipeline = [
@@ -595,7 +554,8 @@ def _process_sampled(
         ),
     ]
 
-    actual_tasks = min(tasks if tasks > 0 else workers, max(1, selected_count // 10000))
+    actual_tasks = calculate_tasks(tasks, workers, selected_count)
+
     executor = LocalPipelineExecutor(
         pipeline=pipeline,
         tasks=actual_tasks,
