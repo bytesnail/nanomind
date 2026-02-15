@@ -32,9 +32,9 @@ datasets:
     source: "data/datasets/nick007x/github-code-2025"
     samples: 12000000
     stars_filter:
-      above_2:
+      above-2-stars:
         count: 10000000
-      below_2:
+      below-2-stars:
         count: 2000000
 
   nemotron_math:
