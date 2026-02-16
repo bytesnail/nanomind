@@ -58,7 +58,7 @@ def get_all_bucket_configs(dataset_key: str) -> list[BucketConfig]:
     return list(configs)
 
 
-def _find_bucket_in_sorted(
+def find_bucket_in_sorted(
     score: float,
     buckets: tuple[BucketConfig, ...] | list[BucketConfig],
 ) -> BucketConfig | None:
@@ -82,4 +82,4 @@ def find_bucket_for_score(
 ) -> BucketConfig | None:
     """查找评分对应的桶。"""
     buckets = get_bucket_configs_for_dataset(dataset_key)[0]
-    return _find_bucket_in_sorted(score, buckets)
+    return find_bucket_in_sorted(score, buckets)

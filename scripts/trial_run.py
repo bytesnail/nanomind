@@ -8,12 +8,13 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from scripts.validate_output import print_report, validate_all_buckets
+from src.data_processing import print_report, validate_all_buckets
 from src.data_processing.bucket_config import (
     find_bucket_for_score,
     get_all_bucket_configs,
 )
 from src.data_processing.config_loader import (
+    DEFAULT_LOG_FORMAT,
     get_dataset_config,
     get_dataset_configs,
     get_paths_config,
@@ -24,9 +25,7 @@ from src.data_processing.fineweb_edu import normalize_score, process_single_data
 _processing_cfg = get_processing_config()
 _paths_cfg = get_paths_config()
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format=DEFAULT_LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
 

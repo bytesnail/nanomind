@@ -2,7 +2,9 @@ import hashlib
 
 from datatrove.pipeline.base import PipelineStep
 
-from .bucket_config import BucketConfig, _find_bucket_in_sorted
+from .bucket_config import BucketConfig, find_bucket_in_sorted
+
+HASH_MAX_VALUE = 2**64
 
 
 class ScoreFilter(PipelineStep):
@@ -19,7 +21,7 @@ class ScoreFilter(PipelineStep):
             return True
         data = f"{self.random_seed}_{doc_id}".encode()
         h = int.from_bytes(hashlib.md5(data, usedforsecurity=False).digest()[:8], "big")
-        return h / (2**64) < rate
+        return h / HASH_MAX_VALUE < rate
 
     def run(self, data, rank: int = 0, world_size: int = 1):
         for doc in data:
@@ -29,7 +31,7 @@ class ScoreFilter(PipelineStep):
                 continue
 
             score = float(score)
-            bucket = _find_bucket_in_sorted(score, self.buckets)
+            bucket = find_bucket_in_sorted(score, self.buckets)
             if bucket is None:
                 self.stat_update("filtered_out", value=1)
                 continue

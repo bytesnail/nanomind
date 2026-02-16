@@ -23,6 +23,8 @@ from ..parquet_merger import merge_all_buckets
 from ..score_filter import ScoreFilter
 from .adapters import fineweb_adapter
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "create_pipeline",
     "get_default_config",
@@ -134,18 +136,18 @@ def process_single_dataset(
 
 
 def process_all_datasets(
-    workers: int = 0,
-    tasks: int = 0,
-    random_seed: int = 0,
-    compression: Compression = DEFAULT_COMPRESSION,
-    max_size: int = 0,
+    workers: int | None = None,
+    tasks: int | None = None,
+    random_seed: int | None = None,
+    compression: Compression | None = None,
+    max_size: int | None = None,
 ) -> dict[str, list[str]]:
     defaults = get_default_config()
-    workers = workers or defaults["workers"]
-    tasks = tasks or defaults["tasks"]
-    random_seed = random_seed or defaults["random_seed"]
-    compression = compression or defaults["compression"]
-    max_size = max_size or defaults["max_size"]
+    workers = workers if workers is not None else defaults["workers"]
+    tasks = tasks if tasks is not None else defaults["tasks"]
+    random_seed = random_seed if random_seed is not None else defaults["random_seed"]
+    compression = compression if compression is not None else defaults["compression"]
+    max_size = max_size if max_size is not None else defaults["max_size"]
 
     dataset_configs = get_dataset_configs()
 
@@ -155,17 +157,17 @@ def process_all_datasets(
         output_dir = Path(dataset_config.get("output_dir", ""))
 
         if not input_dir.exists():
-            print(f"警告：输入目录不存在，跳过 {lang}: {input_dir}", file=sys.stderr)
+            logger.warning(f"输入目录不存在，跳过 {lang}: {input_dir}")
             continue
 
         buckets = get_all_bucket_configs(lang)
         if not buckets:
-            print(f"警告：未找到评分桶配置，跳过 {lang}", file=sys.stderr)
+            logger.warning(f"未找到评分桶配置，跳过 {lang}")
             continue
 
-        print(f"\n处理数据集 [{lang}]: {dataset_config.get('name', lang)}")
-        print(f"  输入: {input_dir}")
-        print(f"  输出: {output_dir}")
+        logger.info(f"处理数据集 [{lang}]: {dataset_config.get('name', lang)}")
+        logger.info(f"  输入: {input_dir}")
+        logger.info(f"  输出: {output_dir}")
 
         result = process_single_dataset(
             input_dir=input_dir,
@@ -183,19 +185,23 @@ def process_all_datasets(
 
 
 def main() -> int:
-    print("FineWeb-Edu 数据集质量评分分桶重组工具")
-    print("=" * 50)
+    logging.basicConfig(
+        level=logging.INFO, format=DEFAULT_LOG_FORMAT, stream=sys.stdout
+    )
+    logger.info("FineWeb-Edu 数据集质量评分分桶重组工具")
+    logger.info("=" * 50)
 
     try:
         results = process_all_datasets()
 
-        print("\n" + "=" * 50)
-        print("所有数据集处理完成")
+        logger.info("")
+        logger.info("=" * 50)
+        logger.info("所有数据集处理完成")
         for lang, buckets in results.items():
-            print(f"  [{lang}]: {', '.join(buckets)}")
+            logger.info(f"  [{lang}]: {', '.join(buckets)}")
         return 0
     except Exception as e:
-        print(f"处理失败：{e}", file=sys.stderr)
+        logger.error(f"处理失败：{e}")
         return 1
 
 

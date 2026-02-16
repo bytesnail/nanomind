@@ -7,6 +7,8 @@ from datatrove.pipeline.base import PipelineStep
 from .bucket_config import BucketConfig
 from .config_loader import DEFAULT_COMPRESSION, DEFAULT_MAX_FILE_SIZE, Compression
 
+ROW_OVERHEAD_BYTES = 32
+
 
 class BucketPathWriter(PipelineStep):
     name = "Bucket Writer"
@@ -35,7 +37,7 @@ class BucketPathWriter(PipelineStep):
     def _estimate_row_size(text: str, doc_id: str) -> int:
         text_bytes = len(text.encode("utf-8"))
         id_bytes = len(doc_id.encode("utf-8"))
-        return text_bytes + id_bytes + 32
+        return text_bytes + id_bytes + ROW_OVERHEAD_BYTES
 
     def _flush_bucket(self, name: str) -> None:
         state = self._states[name]

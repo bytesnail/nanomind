@@ -14,6 +14,9 @@ def normalize_score(
 
 
 def _get_dataset_config_for_source(reader: Any | None = None) -> dict[str, Any]:
+    if reader is None:
+        return {}
+
     all_configs = get_dataset_configs()
 
     data_folder_path = str(reader.data_folder.path)

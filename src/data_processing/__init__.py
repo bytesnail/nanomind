@@ -6,7 +6,12 @@
     - fineweb_edu: FineWeb-Edu 数据集处理
 """
 
-from .bucket_config import BucketConfig, find_bucket_for_score, get_all_bucket_configs
+from .bucket_config import (
+    BucketConfig,
+    find_bucket_for_score,
+    find_bucket_in_sorted,
+    get_all_bucket_configs,
+)
 from .bucket_path_writer import BucketPathWriter
 from .config_loader import Compression
 from .fineweb_edu import (
@@ -17,6 +22,12 @@ from .fineweb_edu import (
 )
 from .parquet_merger import merge_all_buckets, merge_bucket_files
 from .score_filter import ScoreFilter
+from .validation import (
+    print_report,
+    validate_all_buckets,
+    validate_bucket,
+    validate_file,
+)
 
 __all__ = [
     "BucketConfig",
@@ -24,11 +35,16 @@ __all__ = [
     "Compression",
     "ScoreFilter",
     "find_bucket_for_score",
+    "find_bucket_in_sorted",
     "fineweb_adapter",
     "get_all_bucket_configs",
     "merge_all_buckets",
     "merge_bucket_files",
     "normalize_score",
+    "print_report",
     "process_all_datasets",
     "process_single_dataset",
+    "validate_all_buckets",
+    "validate_bucket",
+    "validate_file",
 ]

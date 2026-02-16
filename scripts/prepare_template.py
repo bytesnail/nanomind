@@ -46,9 +46,7 @@ def prepare_template(model_name: str, output_dir: Path) -> None:
     logger.info(f"开始下载 tokenizer: {model_name}")
 
     try:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_name, trust_remote_code=True
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         logger.info(f"成功加载 tokenizer: {model_name}")
     except Exception as e:
         logger.error(f"加载 tokenizer 失败: {e}")

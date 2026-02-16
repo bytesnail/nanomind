@@ -15,6 +15,8 @@ from .config_loader import Compression
 
 logger = logging.getLogger(__name__)
 
+MAX_READ_WORKERS = 32
+
 
 def _read_parquet_file(file_path: Path) -> tuple[Path, pa.Table | None]:
     """读取单个 parquet 文件。"""
@@ -86,7 +88,7 @@ def merge_bucket_files(
     )
 
     if max_workers is None:
-        max_workers = min(32, multiprocessing.cpu_count() * 2)
+        max_workers = min(MAX_READ_WORKERS, multiprocessing.cpu_count() * 2)
 
     # 获取 schema
     try:
@@ -128,7 +130,10 @@ def merge_bucket_files(
                 and current_size + table_size > target_file_size
             ):
                 current_writer.close()
-                assert current_path is not None
+                if current_path is None:
+                    raise RuntimeError(
+                        "Internal error: current_path should not be None after write"
+                    )
                 file_size_mb = current_path.stat().st_size / 1024 / 1024
                 logger.info(f"写入合并文件: {current_path.name} ({file_size_mb:.1f}MB)")
                 merged_files.append(current_path)
@@ -148,7 +153,10 @@ def merge_bucket_files(
 
     if current_writer is not None:
         current_writer.close()
-        assert current_path is not None
+        if current_path is None:
+            raise RuntimeError(
+                "Internal error: current_path should not be None after write"
+            )
         file_size_mb = current_path.stat().st_size / 1024 / 1024
         logger.info(f"写入合并文件: {current_path.name} ({file_size_mb:.1f}MB)")
         merged_files.append(current_path)
