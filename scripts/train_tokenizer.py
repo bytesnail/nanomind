@@ -106,19 +106,14 @@ def load_template_components(template_dir: Path) -> dict:
     return components
 
 
-def create_text_iterator(
-    data_dir: Path, batch_size: int = DEFAULT_BATCH_SIZE
-) -> tuple[int, int]:
-    """创建流式文本迭代器（生成器）。
-
-    使用生成器流式迭代数据，避免一次性加载 40M 样本到内存。
+def get_data_stats(data_dir: Path) -> tuple[int, int]:
+    """获取数据集统计信息。
 
     Args:
         data_dir: 数据目录
-        batch_size: 批次大小
 
-    Yields:
-        文本批次的列表
+    Returns:
+        (总行数, 文件数量)
     """
     parquet_files = sorted(data_dir.rglob("*.parquet"))
     if not parquet_files:
@@ -214,7 +209,7 @@ def train_tokenizer(
     )
 
     # 4. 获取数据统计信息
-    total_rows, total_files = create_text_iterator(data_dir, batch_size)
+    total_rows, total_files = get_data_stats(data_dir)
     logger.info(f"开始训练 ({total_files} 个文件, {total_rows:,} 个样本)")
 
     # 5. 流式训练
@@ -343,7 +338,9 @@ def validate_tokenizer(output_dir: Path, expected_vocab_size: int) -> bool:
 
     # 3. 验证特殊 token 映射
     if tokenizer.pad_token != "<|endoftext|>":
-        errors.append(f"pad_token 不匹配: 期望 '<|endoftext|>', 实际 '{tokenizer.pad_token}'")
+        errors.append(
+            f"pad_token 不匹配: 期望 '<|endoftext|>', 实际 '{tokenizer.pad_token}'"
+        )
     else:
         logger.info(f"✓ pad_token: {tokenizer.pad_token}")
 
