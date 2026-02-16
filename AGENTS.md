@@ -1,126 +1,102 @@
 # AGENTS.md - nanomind
 
+**Generated:** 2026-02-17
+**Commit:** 2afba8e
+**Branch:** main
+
+## OVERVIEW
+
 深度学习、大语言模型学习与试验项目。
 
-## 项目概览
+## STRUCTURE
 
-| 属性 | 值 |
-|------|-----|
-| **语言** | Python 3.13+ |
-| **包管理** | uv (requirements.txt 工作流) |
-| **核心栈** | torch, transformers, datatrove, datasets |
-| **主入口** | `python -m src.data_processing.fineweb_edu` |
-
-## 目录导航
-
-| 目录 | 内容 | AGENTS.md |
-|------|------|-----------|
-| `src/data_processing/` | 核心数据处理模块 | [✅ 查看](./src/data_processing/AGENTS.md) |
-| `config/` | YAML 配置文件 (dataset/processing/paths) | - |
-| `scripts/` | 试运行/验证工具 | - |
-| `tests/` | pytest 单元测试 | - |
-| `docs/` | 设计文档 | - |
-
-## 环境配置
-
-```bash
-# 创建 conda 环境
-conda create -n nanomind python=3.13 -y
-conda activate nanomind
-conda install -c conda-forge uv -y
-conda install -c nvidia cuda=12.9 -y  # GPU 可选
+```
+nanomind/
+├── src/data_processing/     # 核心数据处理模块 [AGENTS.md]
+│   └── fineweb_edu/         # FineWeb-Edu 专用流水线 [AGENTS.md]
+├── scripts/                 # 工具脚本 (trial_run, validate_output)
+├── tests/                   # pytest 测试套件
+├── config/                  # YAML 配置文件
+└── docs/                    # 设计文档 + KNOWLEDGE_BASE.md
 ```
 
-## 依赖管理
+## WHERE TO LOOK
+
+| 任务 | 位置 | 说明 |
+|------|------|------|
+| 添加新数据集 | `config/dataset.yaml` | 定义评分桶和路径 |
+| 修改处理参数 | `config/processing.yaml` | workers, compression, 文件大小 |
+| 扩展 PipelineStep | `src/data_processing/` | ScoreFilter, BucketPathWriter |
+| 数据适配器 | `src/data_processing/fineweb_edu/adapters.py` | normalize_score |
+| 试运行 | `scripts/trial_run.py` | 小规模测试 |
+| 验证输出 | `scripts/validate_output.py` | 分桶结果校验 |
+
+## COMMANDS
 
 ```bash
-# 安装依赖
-uv pip compile pyproject.toml -o requirements.txt
-uv pip install -r requirements.txt
-
-# 添加新依赖（必须使用 --no-sync）
-uv add <package> --no-sync
-uv add --dev <dev-package> --no-sync
-```
-
-### 核心依赖
-
-- **运行时**: torch, torchvision, transformers, datasets, datatrove, matplotlib, tqdm
-- **开发**: ruff, pytest
-
-## 常用命令
-
-```bash
-
-# 代码检查
-ruff check .                 # 检查
-ruff check --fix .           # 自动修复
-ruff format .                # 格式化
-
-# 测试
-pytest                       # 全部测试
-pytest -xvs                  # 详细输出，遇错停止
-pytest -k "test_name"        # 指定测试
+# 环境
+conda create -n nanomind python=3.13 -y && conda activate nanomind
+uv pip compile pyproject.toml -o requirements.txt && uv pip install -r requirements.txt
 
 # 运行
-python -m src.data_processing.fineweb_edu      # 主流程
-python scripts/trial_run.py                     # 试运行
-python scripts/validate_output.py --input ...   # 验证结果
+python -m src.data_processing.fineweb_edu    # 主流程
+python scripts/trial_run.py                   # 试运行
+
+# 测试
+pytest                                        # 全部
+pytest -xvs tests/test_bucket_config.py       # 单文件
+
+# 代码质量
+ruff check . && ruff format .                 # 检查+格式化
 ```
 
-## 代码规范
+## CONVENTIONS
+
+| 规则 | 标准 |
+|------|------|
+| Python | 3.13+ |
+| 行长度 | 88 字符 |
+| 引号 | 双引号优先 |
+| 命名 | snake_case(函数), PascalCase(类), UPPER_CASE(常量) |
+| 导入 | 标准库 → 第三方 → 本地模块 |
+| 类型注解 | 函数签名必须 |
+| 路径 | pathlib.Path，优先相对路径 |
+
+## ANTI-PATTERNS (NEVER)
+
+| 禁止 | 原因 |
+|------|------|
+| `uv add` 不带 `--no-sync` | 项目使用 requirements.txt 工作流 |
+| 提交 `uv.lock` | 已加入 .gitignore |
+| 裸 `except:` | 使用具体异常类型 |
+| 循环内 `import` | 影响性能 |
+| 一次性加载大数据集 | 使用流式处理 |
+| 共享 Datatrove `logging_dir` | 导致任务跳过 |
+
+## DEEP LEARNING
 
 | 规则 | 说明 |
 |------|------|
-| **行长度** | 88 字符 |
-| **引号** | 双引号优先 |
-| **命名** | snake_case(函数/变量), PascalCase(类), UPPER_CASE(常量), _leading_underscore(私有) |
-| **导入** | 标准库 → 第三方 → 本地模块，绝对导入 |
-| **类型** | 函数签名必须类型注解 |
-| **路径** | 优先相对路径，使用 `pathlib.Path` |
+| `torch.no_grad()` | 推理必须使用 |
+| 显式设备移动 | `.to(device)` |
+| `tqdm` 进度条 | 长操作必须 |
+| `gc.collect()` | 大数据集定期调用 |
 
-### 导入规范
+## DEPENDENCY MANAGEMENT
 
-- 分组顺序：**标准库 → 第三方库 → 本地模块**
-- 使用绝对导入，避免相对导入
-- 使用 `isort` 风格排序（ruff 自动处理）
-
-### 错误处理
-
-- 使用具体的异常类型，避免裸 `except:`
-- 资源管理使用上下文管理器 (`with` 语句)
-- 记录错误时提供上下文信息
-
-## 关键约定
-
-### 不使用 uv.lock
-项目采用 `requirements.txt` 工作流。uv.lock 已加入 .gitignore。
-
-### 数据集下载
-使用 `hfd` 脚本下载数据集到 `data/datasets/`：
 ```bash
-hfd HuggingFaceFW/fineweb-edu --local-dir data/datasets/HuggingFaceFW/fineweb-edu
+# 添加依赖（必须 --no-sync）
+uv add <package> --no-sync
+uv add --dev <package> --no-sync
+
+# 更新锁定
+uv pip compile pyproject.toml -o requirements.txt
+uv pip install -r requirements.txt
 ```
 
-### 深度学习规范
-- 推理使用 `torch.no_grad()` 上下文
-- 显式张量设备移动
-- 长操作使用 `tqdm` 进度条
-- 数据集缓存到 `data/datasets/`
+## NOTES
 
-### 配置层级
-1. YAML 配置 (`config/`)
-2. 代码默认值
-
-## 输出目录结构
-
-```
-data/datasets/fineweb/
-├── en/                 # 英文数据集
-│   ├── 2.5/           # 质量分桶
-│   ├── 3.0/
-│   ├── 3.5/
-│   └── 4.0/
-└── zh/                 # 中文数据集
-    └── ...
-```
+- **不使用 uv.lock**: 项目采用 requirements.txt 工作流
+- **数据集下载**: 使用 `hfd` 脚本下载到 `data/datasets/`
+- **内存泄漏**: 启用 jemalloc `LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2`
+- **详细文档**: `docs/KNOWLEDGE_BASE.md` 包含经验教训

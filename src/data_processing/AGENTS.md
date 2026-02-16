@@ -1,76 +1,109 @@
-# AGENTS.md - src/data_processing
+# AGENTS.md - data_processing
 
-FineWeb-Edu 数据集质量评分分桶重组的数据处理流水线。
+数据处理模块：FineWeb-Edu 数据集质量评分分桶重组流水线。
 
-## 模块结构
+## OVERVIEW
+
+提供数据集预处理和重组功能，基于 Datatrove 构建高性能并行处理流水线。
+
+## STRUCTURE
 
 ```
 src/data_processing/
-├── __init__.py              # 模块导出
-├── bucket_config.py         # 评分桶配置管理
-├── bucket_path_writer.py    # 多桶并行 Parquet 写入器
-├── config_loader.py         # YAML 配置加载器
-├── parquet_merger.py        # Parquet 文件合并工具
-├── score_filter.py          # 评分过滤 + 确定性采样
-└── fineweb_edu/             # FineWeb-Edu 专用子模块
-    ├── __init__.py          # 子模块导出
-    ├── __main__.py          # CLI 入口
-    ├── adapters.py          # 数据适配器
-    └── reorganizer.py       # 数据处理流水线
+├── __init__.py              # 导出 18 个公开 API
+├── config_loader.py         # YAML 配置加载 (LRU 缓存)
+├── bucket_config.py         # BucketConfig 数据类 + 二分查找
+├── score_filter.py          # ScoreFilter PipelineStep
+├── bucket_path_writer.py    # BucketPathWriter PipelineStep
+├── parquet_merger.py        # 文件合并工具
+├── validation.py            # 数据验证
+├── README.md                # 模块文档
+└── fineweb_edu/             # FineWeb-Edu 专用子模块 [AGENTS.md]
 ```
 
-## 核心组件速查
+## WHERE TO LOOK
 
-| 组件 | 文件 | 说明 |
-|------|------|------|
-| `BucketConfig` | `bucket_config.py` | 评分桶配置数据类 |
-| `ScoreFilter` | `score_filter.py` | 评分过滤 + 确定性采样 |
-| `BucketPathWriter` | `bucket_path_writer.py` | 多桶并行写入器 |
-| `merge_all_buckets` | `parquet_merger.py` | 合并所有桶的文件 |
-| `fineweb_adapter` | `adapters.py` | 数据适配器函数 |
-| `process_all_datasets` | `reorganizer.py` | 处理所有配置的数据集 |
+| 任务 | 文件 | 函数/类 |
+|------|------|---------|
+| 配置加载 | `config_loader.py` | `get_dataset_configs()`, `get_processing_config()` |
+| 评分桶 | `bucket_config.py` | `BucketConfig`, `find_bucket_for_score()` |
+| 过滤采样 | `score_filter.py` | `ScoreFilter` |
+| 多桶写入 | `bucket_path_writer.py` | `BucketPathWriter` |
+| 文件合并 | `parquet_merger.py` | `merge_all_buckets()` |
+| 数据验证 | `validation.py` | `validate_bucket()`, `print_report()` |
 
-## 关键模式
+## PUBLIC API
 
-### 评分桶区间
-- 采用**左闭右开**区间：`[min_score, max_score)`
-- 最后一个桶 `max_score=None` 表示无上界
-- 桶列表按 `min_score` 排序，支持二分查找
-
-### 确定性采样
 ```python
-# 基于 MD5 哈希的确定性采样
-h = int.from_bytes(hashlib.md5(f"{seed}_{doc_id}".encode()).digest()[:8], "big")
-return h / (2**64) < sampling_rate
+from src.data_processing import (
+    # 配置
+    BucketConfig, Compression,
+    find_bucket_for_score, get_all_bucket_configs,
+    # PipelineSteps
+    BucketPathWriter, ScoreFilter,
+    # 处理
+    fineweb_adapter, normalize_score,
+    process_all_datasets, process_single_dataset,
+    # 工具
+    merge_all_buckets, merge_bucket_files,
+    validate_all_buckets, validate_bucket, validate_file, print_report,
+)
 ```
 
-### 配置加载
+## DEFAULTS (config_loader.py)
+
 ```python
-from src.data_processing import config_loader
-
-# 自动处理环境变量覆盖
-config = config_loader.get_dataset_config("en")
+DEFAULT_WORKERS = 8
+DEFAULT_TASKS = 8
+DEFAULT_RANDOM_SEED = 42
+DEFAULT_COMPRESSION = "zstd"
+DEFAULT_MAX_FILE_SIZE = 512 * 1024 * 1024  # 512MB
 ```
 
-## 评分桶配置
+## PATTERNS
 
-| 数据集 | 评分范围 | 归一化 | 采样策略 |
-|--------|----------|--------|----------|
-| en | 1.0-5.0 | 无 | 2.5(25%), 3.0(50%), 3.5(80%), 4.0(100%) |
-| zh | 0.0-1.0 | ×5 | 2.5(40%), 3.0(60%), 3.5(90%), 4.0(100%) |
+### LRU 缓存
+所有配置加载函数使用 `@lru_cache` 缓存：
+- `_load_yaml(path)` — YAML 文件缓存
+- `get_dataset_configs()` — 数据集配置缓存
+- `get_bucket_configs_for_dataset(key)` — 桶配置缓存
 
-## 测试覆盖
+### PipelineStep 继承
+```python
+from datatrove.pipeline.base import PipelineStep
 
-| 测试文件 | 覆盖内容 |
-|----------|----------|
-| `test_adapters.py` | ID 生成、评分归一化 |
-| `test_bucket_config.py` | 区间匹配、配置加载 |
-| `test_score_filter.py` | 过滤逻辑、采样算法 |
-| `test_bucket_path_writer.py` | 多桶写入、文件分片 |
-| `test_fineweb_reorganizer.py` | 流水线集成测试 |
+class ScoreFilter(PipelineStep):
+    def __init__(self, buckets: list[BucketConfig], random_seed: int): ...
+    def __call__(self, doc: Document) -> Document | None: ...
+```
 
-## 相关文档
+### 相对导入
+```python
+from ..config_loader import get_dataset_configs
+from ..bucket_config import BucketConfig
+```
 
-- [完整设计文档](../docs/fineweb_edu_data_reorganization_design.md) - 架构设计、扩展指南
-- [模块 API 文档](./README.md) - 使用示例、CLI 说明
-- [项目根 AGENTS.md](../../AGENTS.md) - 全局代码规范、环境配置
+## ANTI-PATTERNS
+
+| 禁止 | 替代 |
+|------|------|
+| 模块顶层加载配置 | 使用 `@lru_cache` 延迟加载 |
+| 假设配置字段存在 | 使用 `.get(key, default)` |
+| 循环内创建临时对象 | 预分配或复用 |
+| 存储完整 Path 对象 | 存储整数索引 |
+
+## CONFIGURATION
+
+配置文件位于 `config/`:
+- `dataset.yaml` — 数据集定义、评分桶、归一化
+- `processing.yaml` — workers, compression, 文件大小
+- `paths.yaml` — 路径配置
+
+## TESTING
+
+```bash
+pytest tests/test_bucket_config.py      # BucketConfig 测试
+pytest tests/test_score_filter.py       # ScoreFilter 测试
+pytest tests/test_bucket_path_writer.py # Writer 测试
+pytest tests/test_parquet_merger.py     # 合并测试
+```
