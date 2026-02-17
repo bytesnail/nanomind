@@ -17,6 +17,7 @@ from scripts.prepare_tokenizer_data import (
     TokenizerDataConfig,
     TokenizerDataWriter,
     calculate_tasks,
+    create_row_index_adapter,
     find_bucket_dir,
     compute_doc_hash,
     count_total_rows_fast,
@@ -255,6 +256,34 @@ class TestIndexFilter:
         assert len(filtered) == 5
 
 
+class TestCreateRowIndexAdapter:
+    def test_fineweb_id_preserved(self):
+        adapter = create_row_index_adapter("text", "id")
+        result = adapter(
+            None,
+            {"text": "test", "id": "data/datasets/fineweb/file.parquet#123"},
+            "/path/to/file.parquet",
+            0,
+        )
+        assert result["id"] == "data/datasets/fineweb/file.parquet#123"
+
+    def test_full_path_id_format(self):
+        adapter = create_row_index_adapter("text", "id")
+        result = adapter(
+            None,
+            {"text": "test"},
+            "/data/datasets/github/repo/file.parquet",
+            42,
+        )
+        assert result["id"] == "/data/datasets/github/repo/file.parquet#42"
+
+    def test_id_format_matches_fineweb_adapter(self):
+        adapter = create_row_index_adapter("text", "id")
+        path = "data/datasets/nick007x/github-code-2025/bucket/data.parquet"
+        result = adapter(None, {"text": "test"}, path, 5)
+        assert result["id"] == f"{path}#5"
+
+
 class TestCountTotalRowsFast:
     def test_counts_rows_correctly(self, tmp_path):
         file_path = create_test_parquet(tmp_path, 100)
@@ -298,7 +327,8 @@ class TestTokenizerDataWriter:
         output_dir = tmp_path / "output"
         writer = TokenizerDataWriter(
             output_dir=str(output_dir),
-            prefix="train",
+            dataset_name="test_dataset",
+            bucket_name="4.0",
             max_rows_per_file=1000,
             buffer_size=10,
         )
@@ -306,32 +336,55 @@ class TestTokenizerDataWriter:
             Document(
                 text=f"text_{i}",
                 id=f"doc_{i}",
-                metadata={"source_dataset": "ds", "source_bucket": "bucket"},
+                metadata={"source_dataset": "test_dataset", "source_bucket": "4.0"},
             )
             for i in range(5)
         ]
         writer.run(iter(docs), rank=0, world_size=1)
-        assert len(list(output_dir.glob("*.parquet"))) == 1
+        files = list(output_dir.glob("*.parquet"))
+        assert len(files) == 1
+        assert files[0].name.startswith("test_dataset-4.0-")
 
     def test_correct_schema(self, tmp_path):
         output_dir = tmp_path / "output"
         writer = TokenizerDataWriter(
             output_dir=str(output_dir),
-            prefix="train",
+            dataset_name="fineweb_edu_en",
+            bucket_name="4.0",
             max_rows_per_file=100,
             buffer_size=10,
         )
         doc = Document(
             text="hello world",
             id="doc_1",
-            metadata={"source_dataset": "fineweb", "source_bucket": "4.0"},
+            metadata={"source_dataset": "fineweb_edu_en", "source_bucket": "4.0"},
         )
         writer.run(iter([doc]), rank=0, world_size=1)
         files = list(output_dir.glob("*.parquet"))
         table = pq.read_table(files[0])
         assert "text" in table.column_names
         assert "source_dataset" in table.column_names
+        assert "id" in table.column_names
         assert table.num_rows == 1
+
+    def test_filename_format(self, tmp_path):
+        output_dir = tmp_path / "output"
+        writer = TokenizerDataWriter(
+            output_dir=str(output_dir),
+            dataset_name="fineweb_edu_zh",
+            bucket_name="3.5",
+            max_rows_per_file=100,
+            buffer_size=10,
+        )
+        doc = Document(
+            text="test",
+            id="test_id",
+            metadata={"source_dataset": "fineweb_edu_zh", "source_bucket": "3.5"},
+        )
+        writer.run(iter([doc]), rank=0, world_size=1)
+        files = list(output_dir.glob("*.parquet"))
+        assert len(files) == 1
+        assert files[0].name == "fineweb_edu_zh-3.5-00000-rank-00000.parquet"
 
 
 class TestSaveSamplingInfo:

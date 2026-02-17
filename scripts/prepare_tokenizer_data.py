@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""基于 Datatrove 的 Tokenizer 训练数据准备脚本 (优化版 v3).
+"""基于 Datatrove 的 Tokenizer 训练数据准备脚本 (优化版 v4).
 
 核心优化:
 1. 两遍处理 - 第一遍计算采样索引，第二遍流式读取
@@ -7,14 +7,10 @@
 3. 正确利用 Datatrove 的并行架构 - 采样在 pipeline 外部完成
 4. 针对 32 核/250GB/400MB/s 配置优化默认参数
 
-修复内容 (v3):
-- 修复 TokenizerDataWriter.run() 返回类型，符合 datatrove 约定
-- 添加 jemalloc 内存分配器支持，解决 Linux ptmalloc2 内存泄漏
-- 简化 adapter 实现，使用 ParquetReader 内置 add_file_path 参数
-- 提取 _process_full 和 _process_sampled 公共代码
-- 统一 tasks 计算逻辑
-- 添加定期 gc.collect() 防止内存碎片累积
-- 优化默认参数配置
+v4 更新:
+- 输出文件名格式: {dataset_name}-{bucket_name}-{counter:05d}-rank-{rank:05d}.parquet
+- id 列格式: {完整路径}#{index}，与 fineweb_adapter 保持一致
+- 移除 prefix 和 dataset_source 参数
 
 设计原则:
 - 采样计算与数据读取分离
@@ -152,8 +148,14 @@ def determine_text_column(dataset_name: str) -> str:
 
 
 def create_row_index_adapter(
-    text_key: str = "text", id_key: str = "id"
+    text_key: str = "text",
+    id_key: str = "id",
 ) -> Callable[..., dict]:
+    """创建行索引适配器。
+
+    id 格式: {完整路径}#{index}，与 fineweb_adapter 保持一致
+    """
+
     def adapter(_self: Any, data: dict, path: str, id_in_file: int | str) -> dict:
         metadata = data.pop("metadata", {})
         if isinstance(metadata, str):
@@ -167,9 +169,16 @@ def create_row_index_adapter(
         metadata["row_idx"] = id_in_file
         metadata["file_path"] = path
 
+        original_id = data.pop(id_key, None)
+
+        if original_id and "#" in str(original_id):
+            doc_id = str(original_id)
+        else:
+            doc_id = f"{path}#{id_in_file}"
+
         return {
             "text": data.pop(text_key, ""),
-            "id": data.pop(id_key, f"{path}/{id_in_file}"),
+            "id": doc_id,
             "media": data.pop("media", []),
             "metadata": metadata | data,
         }
@@ -294,14 +303,16 @@ class TokenizerDataWriter(PipelineStep):
     def __init__(
         self,
         output_dir: str,
-        prefix: str = "train",
+        dataset_name: str = "default",
+        bucket_name: str = "default",
         max_rows_per_file: int = DEFAULT_MAX_ROWS,
         buffer_size: int = DEFAULT_BATCH_SIZE,
         compression: str = COMPRESSION,
     ):
         super().__init__()
         self.output_dir = Path(output_dir)
-        self.prefix = prefix
+        self.dataset_name = dataset_name
+        self.bucket_name = bucket_name
         self.max_rows_per_file = max_rows_per_file
         self.buffer_size = buffer_size
         self.compression = compression
@@ -319,13 +330,14 @@ class TokenizerDataWriter(PipelineStep):
 
         table = pa.table(
             {
+                "id": [doc["id"] for doc in batch],
                 "text": [doc["text"] for doc in batch],
                 "source_dataset": [doc["source_dataset"] for doc in batch],
                 "source_bucket": [doc["source_bucket"] for doc in batch],
             }
         )
 
-        filename = f"{self.prefix}-{self._file_counter:05d}-rank-{rank:05d}.parquet"
+        filename = f"{self.dataset_name}-{self.bucket_name}-{self._file_counter:05d}-rank-{rank:05d}.parquet"
         output_path = self.output_dir / filename
 
         pq.write_table(table, output_path, compression=self.compression)
@@ -350,6 +362,7 @@ class TokenizerDataWriter(PipelineStep):
         for doc in data:
             batch.append(
                 {
+                    "id": doc.id,
                     "text": doc.text,
                     "source_dataset": doc.metadata.get("source_dataset", "unknown"),
                     "source_bucket": doc.metadata.get("source_bucket", "unknown"),
@@ -397,6 +410,17 @@ def count_total_rows_fast(files: list[Path]) -> int:
     return total
 
 
+def count_written_rows(output_dir: Path, dataset_name: str, bucket_name: str) -> int:
+    pattern = f"{dataset_name}-{bucket_name}-*.parquet"
+    total = 0
+    for fp in output_dir.glob(pattern):
+        try:
+            total += pq.read_metadata(fp).num_rows
+        except Exception as e:
+            logger.warning(f"无法读取 {fp} 元数据: {e}")
+    return total
+
+
 def process_bucket_streaming(
     files: list[Path],
     bucket_name: str,
@@ -409,30 +433,21 @@ def process_bucket_streaming(
     max_rows_per_file: int = DEFAULT_MAX_ROWS,
     buffer_size: int = DEFAULT_BATCH_SIZE,
 ) -> int:
-    """使用Datatrove流式处理单个桶。
-
-    优化策略:
-    1. 如果目标数接近总数(>90%)，全量读取后采样
-    2. 如果目标数较少，使用流式采样
-    3. 针对大文件优化批次大小
-    """
     if not files:
         logger.warning(f"桶 {bucket_name} 无数据文件")
         return 0
 
     text_column = determine_text_column(dataset_name)
 
-    # 快速统计总行数（只读元数据）
     total_rows = count_total_rows_fast(files)
     logger.info(f"  [{bucket_name}] 总行数: {total_rows:,}, 目标: {target_count:,}")
 
     if total_rows == 0:
         return 0
 
-    # 如果目标数超过总数的 90%，直接全量处理
     if target_count >= total_rows * 0.9:
         logger.info(f"  [{bucket_name}] 全量处理模式")
-        return _process_full(
+        _process_full(
             files=files,
             bucket_name=bucket_name,
             dataset_name=dataset_name,
@@ -442,24 +457,26 @@ def process_bucket_streaming(
             max_rows_per_file=max_rows_per_file,
             buffer_size=buffer_size,
             text_column=text_column,
-            total_rows=total_rows,
+        )
+    else:
+        logger.info(f"  [{bucket_name}] 流式采样模式")
+        _process_sampled(
+            files=files,
+            bucket_name=bucket_name,
+            target_count=target_count,
+            seed=seed,
+            dataset_name=dataset_name,
+            output_dir=output_dir,
+            workers=workers,
+            tasks=tasks,
+            max_rows_per_file=max_rows_per_file,
+            buffer_size=buffer_size,
+            text_column=text_column,
         )
 
-    # 流式采样模式
-    logger.info(f"  [{bucket_name}] 流式采样模式")
-    return _process_sampled(
-        files=files,
-        bucket_name=bucket_name,
-        target_count=target_count,
-        seed=seed,
-        dataset_name=dataset_name,
-        output_dir=output_dir,
-        workers=workers,
-        tasks=tasks,
-        max_rows_per_file=max_rows_per_file,
-        buffer_size=buffer_size,
-        text_column=text_column,
-    )
+    actual_written = count_written_rows(output_dir, dataset_name, bucket_name)
+    logger.info(f"  [{bucket_name}] 实际写入: {actual_written:,} 行")
+    return actual_written
 
 
 def _process_full(
@@ -472,8 +489,7 @@ def _process_full(
     max_rows_per_file: int,
     buffer_size: int,
     text_column: str,
-    total_rows: int,
-) -> int:
+) -> None:
     bucket_dir = find_bucket_dir(files, bucket_name)
     row_idx_adapter = create_row_index_adapter(text_column)
 
@@ -487,7 +503,8 @@ def _process_full(
         SourceTagger(dataset_name=dataset_name, bucket_name=bucket_name),
         TokenizerDataWriter(
             output_dir=str(output_dir),
-            prefix="train",
+            dataset_name=dataset_name,
+            bucket_name=bucket_name,
             max_rows_per_file=max_rows_per_file,
             buffer_size=buffer_size,
         ),
@@ -504,7 +521,6 @@ def _process_full(
     )
 
     executor.run()
-    return total_rows
 
 
 def _process_sampled(
@@ -519,7 +535,7 @@ def _process_sampled(
     max_rows_per_file: int,
     buffer_size: int,
     text_column: str,
-) -> int:
+) -> None:
     indices = precompute_sampling_indices(
         files=files,
         bucket_name=bucket_name,
@@ -529,7 +545,7 @@ def _process_sampled(
 
     if not indices:
         logger.warning(f"  [{bucket_name}] 采样索引为空")
-        return 0
+        return
 
     selected_count = sum(len(v) for v in indices.values())
     logger.info(f"  [{bucket_name}] 已选择 {selected_count:,} 个索引，开始流式读取...")
@@ -548,7 +564,8 @@ def _process_sampled(
         SourceTagger(dataset_name=dataset_name, bucket_name=bucket_name),
         TokenizerDataWriter(
             output_dir=str(output_dir),
-            prefix="train",
+            dataset_name=dataset_name,
+            bucket_name=bucket_name,
             max_rows_per_file=max_rows_per_file,
             buffer_size=min(selected_count, buffer_size),
         ),
@@ -565,7 +582,6 @@ def _process_sampled(
     )
 
     executor.run()
-    return selected_count
 
 
 def process_dataset(
