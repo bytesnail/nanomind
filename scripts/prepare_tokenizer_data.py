@@ -742,15 +742,32 @@ def prepare_tokenizer_data(
 
         print()
         logger.info("各数据源采样详情:")
+        total_actual_written = 0
         for source_key, stats in source_stats.items():
-            logger.info(f"  [{source_key}] {stats['name']}")
-            logger.info(f"    请求: {stats['requested']:,}, 采样: {stats['sampled']:,}")
+            dataset_name = stats["name"]
+            logger.info(f"  [{source_key}] {dataset_name}")
+
+            dataset_actual = 0
             if stats["buckets"]:
                 for bucket_name, bucket_stats in stats["buckets"].items():
-                    logger.info(
-                        f"      {bucket_name}: {bucket_stats['sampled']:,} "
-                        f"(目标: {bucket_stats['requested']:,})"
+                    actual_written = count_written_rows(
+                        config.output_dir, dataset_name, bucket_name
                     )
+                    dataset_actual += actual_written
+                    logger.info(
+                        f"      {bucket_name}: 目标={bucket_stats['requested']:,}, "
+                        f"采样={bucket_stats['sampled']:,}, 实际={actual_written:,}"
+                    )
+
+            total_actual_written += dataset_actual
+            logger.info(
+                f"    汇总: 请求={stats['requested']:,}, 采样={stats['sampled']:,}, "
+                f"实际={dataset_actual:,}"
+            )
+
+        logger.info(
+            f"总实际写入: {total_actual_written:,} (与采样总数 {total_sampled:,} 对比)"
+        )
 
         return 0
 
