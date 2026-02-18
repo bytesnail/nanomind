@@ -255,6 +255,37 @@ class TestIndexFilter:
 
         assert len(filtered) == 5
 
+    def test_accepts_list_indices(self, tmp_path):
+        """测试 IndexFilter 接受 list 格式的索引（JSON 序列化场景）。"""
+        file_path = create_test_parquet(tmp_path, 10)
+        filter_step = IndexFilter(indices={str(file_path): [1, 3, 5]})
+        docs = create_test_documents(file_path, 10)
+
+        result = list(filter_step.run(iter(docs), rank=0, world_size=1))
+        assert len(result) == 3
+        assert {doc.metadata["row_idx"] for doc in result} == {1, 3, 5}
+
+    def test_accepts_string_indices(self, tmp_path):
+        """测试 IndexFilter 接受字符串格式的 set（JSON 序列化恢复场景）。"""
+        file_path = create_test_parquet(tmp_path, 10)
+        filter_step = IndexFilter(indices={str(file_path): "{1, 3, 5, 7}"})
+        docs = create_test_documents(file_path, 10)
+
+        result = list(filter_step.run(iter(docs), rank=0, world_size=1))
+        assert len(result) == 4
+        assert {doc.metadata["row_idx"] for doc in result} == {1, 3, 5, 7}
+
+    def test_string_indices_type_conversion(self):
+        filter_step = IndexFilter(indices={"test.parquet": "{0, 2, 4}"})
+
+        assert isinstance(filter_step.indices["test.parquet"], set)
+        assert filter_step.indices["test.parquet"] == {0, 2, 4}
+
+    def test_invalid_string_indices_returns_empty_set(self, tmp_path):
+        filter_step = IndexFilter(indices={"test.parquet": "not a valid set"})
+
+        assert filter_step.indices["test.parquet"] == set()
+
 
 class TestCreateRowIndexAdapter:
     def test_fineweb_id_preserved(self):
@@ -385,6 +416,42 @@ class TestTokenizerDataWriter:
         files = list(output_dir.glob("*.parquet"))
         assert len(files) == 1
         assert files[0].name == "fineweb_edu_zh-3.5-00000-rank-00000.parquet"
+
+    def test_multiple_batches_no_overwrite(self, tmp_path):
+        output_dir = tmp_path / "output"
+        writer = TokenizerDataWriter(
+            output_dir=str(output_dir),
+            dataset_name="test_dataset",
+            bucket_name="test_bucket",
+            max_rows_per_file=1000,
+            buffer_size=3,
+        )
+        docs = [
+            Document(
+                text=f"text_{i}",
+                id=f"doc_{i}",
+                metadata={
+                    "source_dataset": "test_dataset",
+                    "source_bucket": "test_bucket",
+                },
+            )
+            for i in range(10)
+        ]
+        writer.run(iter(docs), rank=0, world_size=1)
+
+        files = sorted(output_dir.glob("*.parquet"))
+        assert len(files) == 4
+
+        total_rows = sum(pq.read_table(f).num_rows for f in files)
+        assert total_rows == 10
+
+        expected_names = [
+            "test_dataset-test_bucket-00000-rank-00000.parquet",
+            "test_dataset-test_bucket-00001-rank-00000.parquet",
+            "test_dataset-test_bucket-00002-rank-00000.parquet",
+            "test_dataset-test_bucket-00003-rank-00000.parquet",
+        ]
+        assert [f.name for f in files] == expected_names
 
 
 class TestSaveSamplingInfo:

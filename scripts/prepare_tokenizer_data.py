@@ -21,6 +21,7 @@ v4 更新:
 from __future__ import annotations
 
 import argparse
+import ast
 import gc
 import hashlib
 import heapq
@@ -251,12 +252,30 @@ class IndexFilter(PipelineStep):
     name = "Index Filter"
     type = "🎯 - FILTER"
 
-    def __init__(self, indices: dict[Path, set[int]]):
+    def __init__(
+        self, indices: dict[Path, set[int]] | dict[str, set[int] | list[int] | str]
+    ):
         super().__init__()
         self.indices: dict[str, set[int]] = {}
         for k, v in indices.items():
-            self.indices[str(k)] = v
-            self.indices[k.name] = v
+            if isinstance(v, set):
+                row_set = v
+            elif isinstance(v, list):
+                row_set = set(v)
+            elif isinstance(v, str):
+                try:
+                    row_set = ast.literal_eval(v)
+                    if not isinstance(row_set, set):
+                        row_set = (
+                            set(row_set) if hasattr(row_set, "__iter__") else set()
+                        )
+                except (ValueError, SyntaxError):
+                    row_set = set()
+            else:
+                row_set = set()
+            key_name = k.name if isinstance(k, Path) else str(k)
+            self.indices[str(k)] = row_set
+            self.indices[key_name] = row_set
 
     def run(
         self,
@@ -318,7 +337,7 @@ class TokenizerDataWriter(PipelineStep):
         self.compression = compression
 
         self._buffer: list[dict] = []
-        self._file_counter = 0
+        self._batch_counter = 0
         self._rows_in_current_file = 0
         self._total_written = 0
 
@@ -337,7 +356,7 @@ class TokenizerDataWriter(PipelineStep):
             }
         )
 
-        filename = f"{self.dataset_name}-{self.bucket_name}-{self._file_counter:05d}-rank-{rank:05d}.parquet"
+        filename = f"{self.dataset_name}-{self.bucket_name}-{self._batch_counter:05d}-rank-{rank:05d}.parquet"
         output_path = self.output_dir / filename
 
         pq.write_table(table, output_path, compression=self.compression)
@@ -345,10 +364,7 @@ class TokenizerDataWriter(PipelineStep):
         self._rows_in_current_file += len(batch)
         self._total_written += len(batch)
         self.stat_update("rows_written", value=len(batch))
-
-        if self._rows_in_current_file >= self.max_rows_per_file:
-            self._file_counter += 1
-            self._rows_in_current_file = 0
+        self._batch_counter += 1
 
     def run(
         self,
@@ -381,7 +397,7 @@ class TokenizerDataWriter(PipelineStep):
 
         gc.collect()
         logger.info(
-            f"写入完成: {self._total_written:,} 行到 {self._file_counter + 1} 个文件"
+            f"写入完成: {self._total_written:,} 行到 {self._batch_counter} 个文件"
         )
 
     def get_total_written(self) -> int:
