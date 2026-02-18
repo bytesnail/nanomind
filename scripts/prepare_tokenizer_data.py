@@ -181,7 +181,7 @@ def create_row_index_adapter(
             "text": data.pop(text_key, ""),
             "id": doc_id,
             "media": data.pop("media", []),
-            "metadata": metadata | data,
+            "metadata": data | metadata,
         }
 
     return adapter
@@ -591,7 +591,7 @@ def _process_full(
         pipeline=pipeline,
         tasks=actual_tasks,
         workers=workers,
-        logging_dir=str(output_dir / "logs" / bucket_name),
+        logging_dir=str(output_dir / "logs" / dataset_name / bucket_name),
         randomize_start_duration=RANDOMIZE_START_DURATION,
     )
 
@@ -652,7 +652,7 @@ def _process_sampled(
         pipeline=pipeline,
         tasks=actual_tasks,
         workers=workers,
-        logging_dir=str(output_dir / "logs" / bucket_name),
+        logging_dir=str(output_dir / "logs" / dataset_name / bucket_name),
         randomize_start_duration=RANDOMIZE_START_DURATION,
     )
 
