@@ -286,6 +286,55 @@ class TestIndexFilter:
 
         assert filter_step.indices["test.parquet"] == set()
 
+    def test_matches_filename_only_path(self, tmp_path):
+        """测试 IndexFilter 支持文件名匹配（ParquetReader 只提供文件名）。"""
+        file_path = create_test_parquet(tmp_path, 10)
+        # 使用完整路径创建索引
+        filter_step = IndexFilter(indices={file_path: {1, 3, 5}})
+
+        # 但文档的 file_path 只有文件名（模拟 ParquetReader 行为）
+        docs = [
+            Document(
+                text=f"text_{i}",
+                id=f"doc_{i}",
+                metadata={"file_path": file_path.name, "row_idx": i},
+            )
+            for i in range(10)
+        ]
+
+        result = list(filter_step.run(iter(docs), rank=0, world_size=1))
+        assert len(result) == 3
+        assert {doc.metadata["row_idx"] for doc in result} == {1, 3, 5}
+
+    def test_matches_both_full_path_and_filename(self, tmp_path):
+        """测试 IndexFilter 同时支持完整路径和文件名匹配。"""
+        file_path = create_test_parquet(tmp_path, 10)
+        filter_step = IndexFilter(indices={file_path: {2, 4}})
+
+        # 混合使用完整路径和文件名
+        docs_full_path = [
+            Document(
+                text="text_0",
+                id="doc_0",
+                metadata={"file_path": str(file_path), "row_idx": 2},
+            )
+        ]
+        docs_filename = [
+            Document(
+                text="text_1",
+                id="doc_1",
+                metadata={"file_path": file_path.name, "row_idx": 4},
+            )
+        ]
+
+        result_full = list(filter_step.run(iter(docs_full_path), rank=0, world_size=1))
+        result_name = list(filter_step.run(iter(docs_filename), rank=0, world_size=1))
+
+        assert len(result_full) == 1
+        assert len(result_name) == 1
+        assert result_full[0].metadata["row_idx"] == 2
+        assert result_name[0].metadata["row_idx"] == 4
+
 
 class TestCreateRowIndexAdapter:
     def test_fineweb_id_preserved(self):

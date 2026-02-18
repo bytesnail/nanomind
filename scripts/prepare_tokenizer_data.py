@@ -273,9 +273,11 @@ class IndexFilter(PipelineStep):
                     row_set = set()
             else:
                 row_set = set()
-            key_name = k.name if isinstance(k, Path) else str(k)
-            self.indices[str(k)] = row_set
-            self.indices[key_name] = row_set
+            # 同时存储完整路径和文件名，以支持两种匹配方式
+            full_path = str(k)
+            file_name = k.name if isinstance(k, Path) else Path(str(k)).name
+            self.indices[full_path] = row_set
+            self.indices[file_name] = row_set
 
     def run(
         self,
@@ -286,6 +288,7 @@ class IndexFilter(PipelineStep):
         for doc in data:
             file_path = doc.metadata.get("file_path", "")
             row_idx = doc.metadata.get("row_idx")
+            # 同时尝试完整路径和文件名匹配
             if file_path in self.indices and row_idx in self.indices[file_path]:
                 self.stat_update("passed", value=1)
                 yield doc
