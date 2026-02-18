@@ -440,6 +440,62 @@ def count_written_rows(output_dir: Path, dataset_name: str, bucket_name: str) ->
     return total
 
 
+def print_sample_texts(
+    output_dir: Path,
+    dataset_name: str,
+    bucket_name: str,
+    max_samples: int = 2,
+    max_text_length: int = 80,
+) -> None:
+    """打印样本内容的所有字段（一行一条，text字段截断）。
+
+    Args:
+        output_dir: 输出目录
+        dataset_name: 数据集名称
+        bucket_name: 桶名称
+        max_samples: 最大样本数
+        max_text_length: text字段最大显示长度（默认80字符）
+    """
+    pattern = f"{dataset_name}-{bucket_name}-*.parquet"
+    files = list(output_dir.glob(pattern))
+
+    if not files:
+        return
+
+    samples_printed = 0
+    for fp in sorted(files):
+        if samples_printed >= max_samples:
+            break
+        try:
+            table = pq.read_table(fp)
+
+            for row_idx in range(min(max_samples - samples_printed, table.num_rows)):
+                row_data = {
+                    col: table[col][row_idx].as_py() for col in table.column_names
+                }
+
+                # 格式化每个字段
+                formatted_parts = []
+                for col in ["id", "source_dataset", "source_bucket", "text"]:
+                    if col in row_data:
+                        val = row_data[col]
+                        if isinstance(val, str):
+                            # 去除换行符
+                            val = val.replace("\n", " ").replace("\r", " ")
+                            # text字段截断
+                            if col == "text" and len(val) > max_text_length:
+                                val = val[:max_text_length] + "..."
+                        formatted_parts.append(f"{col}={val}")
+
+                logger.info(
+                    f"        样本 {samples_printed + 1}: {' | '.join(formatted_parts)}"
+                )
+                samples_printed += 1
+
+        except Exception as e:
+            logger.warning(f"无法读取样本 {fp}: {e}")
+
+
 def process_bucket_streaming(
     files: list[Path],
     bucket_name: str,
@@ -777,6 +833,15 @@ def prepare_tokenizer_data(
                         f"      {bucket_name}: 目标={bucket_stats['requested']:,}, "
                         f"采样={bucket_stats['sampled']:,}, 实际={actual_written:,}"
                     )
+                    # 打印样本内容（每个桶最多2条，text字段截断）
+                    if actual_written > 0:
+                        print_sample_texts(
+                            config.output_dir,
+                            dataset_name,
+                            bucket_name,
+                            max_samples=2,
+                            max_text_length=200,
+                        )
 
             total_actual_written += dataset_actual
             logger.info(
