@@ -204,10 +204,6 @@ def chunked_batch_iterator(
         )
         chunk_files = parquet_files[start_idx:end_idx]
 
-        logger.info(
-            f"处理第 {chunk_idx + 1}/{num_chunks} 块 ({len(chunk_files)} 个文件)"
-        )
-
         chunk_rows = 0
         batch = []
         for fp in tqdm(chunk_files, desc=f"块 {chunk_idx + 1}", leave=False):
@@ -369,8 +365,15 @@ def train_tokenizer(
         chunk_vocab = chunk_tokenizer.get_vocab()
 
         # 统计当前 chunk 中各 token 的频率
+        logger.info(
+            f"统计第 {current_chunk_idx + 1} 块 token 频率 ({len(current_chunk_texts):,} 条文本)..."
+        )
         token_frequencies = Counter()
-        for text in current_chunk_texts:
+        for text in tqdm(
+            current_chunk_texts,
+            desc=f"统计块 {current_chunk_idx + 1} 频率",
+            leave=False,
+        ):
             encoded = chunk_tokenizer.encode(text)
             for tid in encoded.ids:
                 tok = chunk_tokenizer.id_to_token(tid)
