@@ -239,23 +239,38 @@ def chunked_batch_iterator(
 
 
 def save_chunk_vocab(
-    vocab: dict[str, int], chunk_idx: int, checkpoint_dir: Path
+    vocab: dict[str, int],
+    chunk_idx: int,
+    checkpoint_dir: Path,
+    token_frequencies: dict[str, int] | None = None,
 ) -> Path:
+    """保存词表及可选的频率信息。"""
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     vocab_path = checkpoint_dir / f"vocab_chunk_{chunk_idx}.json"
 
+    data = {"vocab": vocab}
+    if token_frequencies:
+        data["frequencies"] = token_frequencies
+
     with open(vocab_path, "w", encoding="utf-8") as f:
-        json.dump(vocab, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
     logger.info(f"词表已保存: {vocab_path} ({len(vocab)} tokens)")
     return vocab_path
 
 
-def load_chunk_vocab(checkpoint_dir: Path, chunk_idx: int) -> dict[str, int] | None:
+def load_chunk_vocab(
+    checkpoint_dir: Path, chunk_idx: int
+) -> tuple[dict[str, int], dict[str, int]] | None:
+    """加载词表及频率信息。"""
     vocab_path = checkpoint_dir / f"vocab_chunk_{chunk_idx}.json"
     if vocab_path.exists():
         logger.info(f"加载词表: {vocab_path}")
         with open(vocab_path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict) and "vocab" in data:
+            return data["vocab"], data.get("frequencies", {})
+        # 兼容旧格式
+        return data, {}
     return None
 
 
@@ -324,16 +339,19 @@ def train_tokenizer(
     logger.info(f"每块训练词表大小: {chunk_vocab_size}")
 
     all_vocabs = {}
-    for chunk_idx, batch in chunked_batch_iterator(
-        data_dir, batch_size, num_chunks, resume_chunk
-    ):
-        saved_vocab = load_chunk_vocab(checkpoint_dir, chunk_idx)
-        if saved_vocab:
-            logger.info(f"第 {chunk_idx + 1} 块已处理，跳过")
-            all_vocabs.update(saved_vocab)
-            continue
+    processed_chunks = set()
+    current_chunk_idx = None
+    current_chunk_texts = []
 
-        logger.info(f"训练第 {chunk_idx + 1} 块词表...")
+    def train_current_chunk():
+        """训练当前 chunk 的词表。"""
+        nonlocal current_chunk_texts, current_chunk_idx
+        if not current_chunk_texts or current_chunk_idx is None:
+            return
+
+        logger.info(
+            f"训练第 {current_chunk_idx + 1} 块词表 ({len(current_chunk_texts):,} 条文本)..."
+        )
         chunk_tokenizer = Tokenizer(BPE(unk_token=None))
         chunk_tokenizer.normalizer = components.get("normalizer")
         chunk_tokenizer.pre_tokenizer = components.get("pre_tokenizer")
@@ -342,23 +360,67 @@ def train_tokenizer(
         chunk_trainer = BpeTrainer(
             vocab_size=chunk_vocab_size,
             min_frequency=min_frequency,
-            show_progress=False,
+            show_progress=True,
             special_tokens=[],
         )
 
-        chunk_tokenizer.train_from_iterator([batch], trainer=chunk_trainer)
+        chunk_tokenizer.train_from_iterator(current_chunk_texts, trainer=chunk_trainer)
 
         vocab = chunk_tokenizer.get_vocab()
-        save_chunk_vocab(vocab, chunk_idx, checkpoint_dir)
+
+        # 统计当前 chunk 中各 token 的频率
+        token_frequencies = Counter()
+        for text in current_chunk_texts:
+            encoded = chunk_tokenizer.encode(text)
+            for token_id in encoded.ids:
+                token = chunk_tokenizer.id_to_token(token_id)
+                if token:
+                    token_frequencies[token] += 1
+
+        save_chunk_vocab(
+            vocab, current_chunk_idx, checkpoint_dir, dict(token_frequencies)
+        )
         all_vocabs.update(vocab)
+        processed_chunks.add(current_chunk_idx)
 
         del chunk_tokenizer, vocab
         gc.collect()
+        current_chunk_texts = []
+
+    # 累积所有 chunk 的频率
+    all_token_freq: dict[str, int] = {}
+
+    for chunk_idx, batch in chunked_batch_iterator(
+        data_dir, batch_size, num_chunks, resume_chunk
+    ):
+        if chunk_idx in processed_chunks:
+            continue
+
+        loaded = load_chunk_vocab(checkpoint_dir, chunk_idx)
+        if loaded:
+            vocab, freq = loaded
+            logger.info(f"第 {chunk_idx + 1} 块已处理，跳过")
+            all_vocabs.update(vocab)
+            # 累加频率
+            for token, count in freq.items():
+                all_token_freq[token] = all_token_freq.get(token, 0) + count
+            processed_chunks.add(chunk_idx)
+            continue
+
+        # 切换到新 chunk 时，先训练前一个 chunk
+        if chunk_idx != current_chunk_idx:
+            train_current_chunk()
+            current_chunk_idx = chunk_idx
+
+        current_chunk_texts.extend(batch)
+
+    # 训练最后一个 chunk
+    train_current_chunk()
 
     logger.info(f"收集到 {len(all_vocabs)} 个 token，合并为最终词表...")
 
-    token_counts = Counter(all_vocabs.keys())
-    top_tokens = [t for t, _ in token_counts.most_common(bpe_vocab_size)]
+    # 使用累积频率选择 top tokens
+    top_tokens = [t for t, _ in Counter(all_token_freq).most_common(bpe_vocab_size)]
 
     final_vocab = {token: idx for idx, token in enumerate(top_tokens)}
 
