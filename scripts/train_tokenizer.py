@@ -364,21 +364,30 @@ def train_tokenizer(
 
         chunk_vocab = chunk_tokenizer.get_vocab()
 
-        # 统计当前 chunk 中各 token 的频率
+        # 统计当前 chunk 中各 token 的频率（批处理优化）
         logger.info(
             f"统计第 {current_chunk_idx + 1} 块 token 频率 ({len(current_chunk_texts):,} 条文本)..."
         )
-        token_frequencies = Counter()
-        for text in tqdm(
-            current_chunk_texts,
+        token_id_counts = Counter()
+        encode_batch_size = 10000
+
+        for i in tqdm(
+            range(0, len(current_chunk_texts), encode_batch_size),
             desc=f"统计块 {current_chunk_idx + 1} 频率",
             leave=False,
         ):
-            encoded = chunk_tokenizer.encode(text)
-            for tid in encoded.ids:
-                tok = chunk_tokenizer.id_to_token(tid)
-                if tok:
-                    token_frequencies[tok] += 1
+            batch = current_chunk_texts[i : i + encode_batch_size]
+            encodings = chunk_tokenizer.encode_batch(batch)
+            for enc in encodings:
+                token_id_counts.update(enc.ids)
+
+        # token ID 转 token 字符串
+        id_to_token_map = {v: k for k, v in chunk_vocab.items()}
+        token_frequencies = {
+            id_to_token_map[tid]: count
+            for tid, count in token_id_counts.items()
+            if tid in id_to_token_map
+        }
 
         save_chunk_vocab(
             chunk_vocab, current_chunk_idx, checkpoint_dir, dict(token_frequencies)
