@@ -366,24 +366,24 @@ def train_tokenizer(
 
         chunk_tokenizer.train_from_iterator(current_chunk_texts, trainer=chunk_trainer)
 
-        vocab = chunk_tokenizer.get_vocab()
+        chunk_vocab = chunk_tokenizer.get_vocab()
 
         # 统计当前 chunk 中各 token 的频率
         token_frequencies = Counter()
         for text in current_chunk_texts:
             encoded = chunk_tokenizer.encode(text)
-            for token_id in encoded.ids:
-                token = chunk_tokenizer.id_to_token(token_id)
-                if token:
-                    token_frequencies[token] += 1
+            for tid in encoded.ids:
+                tok = chunk_tokenizer.id_to_token(tid)
+                if tok:
+                    token_frequencies[tok] += 1
 
         save_chunk_vocab(
-            vocab, current_chunk_idx, checkpoint_dir, dict(token_frequencies)
+            chunk_vocab, current_chunk_idx, checkpoint_dir, dict(token_frequencies)
         )
-        all_vocabs.update(vocab)
+        all_vocabs.update(chunk_vocab)
         processed_chunks.add(current_chunk_idx)
 
-        del chunk_tokenizer, vocab
+        del chunk_tokenizer, chunk_vocab
         gc.collect()
         current_chunk_texts = []
 
