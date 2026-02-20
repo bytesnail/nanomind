@@ -371,22 +371,23 @@ def train_tokenizer(
         token_id_counts = Counter()
         encode_batch_size = 10000
 
-        for i in tqdm(
+        for batch_start_idx in tqdm(
             range(0, len(current_chunk_texts), encode_batch_size),
             desc=f"统计块 {current_chunk_idx + 1} 频率",
             leave=False,
         ):
-            batch = current_chunk_texts[i : i + encode_batch_size]
-            encodings = chunk_tokenizer.encode_batch(batch)
+            encode_batch = current_chunk_texts[
+                batch_start_idx : batch_start_idx + encode_batch_size
+            ]
+            encodings = chunk_tokenizer.encode_batch(encode_batch)
             for enc in encodings:
                 token_id_counts.update(enc.ids)
 
-        # token ID 转 token 字符串
         id_to_token_map = {v: k for k, v in chunk_vocab.items()}
         token_frequencies = {
-            id_to_token_map[tid]: count
-            for tid, count in token_id_counts.items()
-            if tid in id_to_token_map
+            id_to_token_map[token_id]: freq
+            for token_id, freq in token_id_counts.items()
+            if token_id in id_to_token_map
         }
 
         save_chunk_vocab(
