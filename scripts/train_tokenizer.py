@@ -331,19 +331,36 @@ def train_tokenizer(
         total_rows, total_files = get_data_stats(data_dir)
         logger.info(f"数据集: {total_files} 个文件, {total_rows:,} 个样本")
 
-    chunk_vocab_size = max(1000, bpe_vocab_size // num_chunks)
-    logger.info(f"每块训练词表大小: {chunk_vocab_size}")
+    # 每块训练完整的词表大小，最后从全局候选池择优
+    chunk_vocab_size = bpe_vocab_size
+    logger.info(f"每块训练词表大小: {chunk_vocab_size} (从全局候选池择优)")
 
-    all_vocabs = {}
-    processed_chunks = set()
+    all_vocabs: dict[str, int] = {}
+    all_token_freq: dict[str, int] = {}
+    processed_chunks: set[int] = set()
     current_chunk_idx = None
     current_chunk_texts = []
 
-    def train_current_chunk():
-        """训练当前 chunk 的词表。"""
+    # 断点续训：加载已处理块的频率数据
+    if resume and resume_chunk > 0:
+        logger.info(f"加载已处理块 0-{resume_chunk - 1} 的频率数据...")
+        for prev_chunk_idx in range(resume_chunk):
+            loaded = load_chunk_vocab(checkpoint_dir, prev_chunk_idx)
+            if loaded:
+                vocab, freq = loaded
+                all_vocabs.update(vocab)
+                for token, count in freq.items():
+                    all_token_freq[token] = all_token_freq.get(token, 0) + count
+                processed_chunks.add(prev_chunk_idx)
+        logger.info(
+            f"已加载 {len(processed_chunks)} 个块，累计 {len(all_vocabs)} 个候选 token"
+        )
+
+    def train_current_chunk() -> dict[str, int] | None:
+        """训练当前 chunk 的词表，返回该块的 token 频率统计。"""
         nonlocal current_chunk_texts, current_chunk_idx
         if not current_chunk_texts or current_chunk_idx is None:
-            return
+            return None
 
         logger.info(
             f"训练第 {current_chunk_idx + 1} 块词表 ({len(current_chunk_texts):,} 条文本)..."
@@ -400,8 +417,7 @@ def train_tokenizer(
         gc.collect()
         current_chunk_texts = []
 
-    # 累积所有 chunk 的频率
-    all_token_freq: dict[str, int] = {}
+        return token_frequencies
 
     for chunk_idx, batch in chunked_batch_iterator(
         data_dir, batch_size, num_chunks, resume_chunk
@@ -422,15 +438,26 @@ def train_tokenizer(
 
         # 切换到新 chunk 时，先训练前一个 chunk
         if chunk_idx != current_chunk_idx:
-            train_current_chunk()
+            chunk_freq = train_current_chunk()
+            if chunk_freq:
+                for token, count in chunk_freq.items():
+                    all_token_freq[token] = all_token_freq.get(token, 0) + count
             current_chunk_idx = chunk_idx
 
         current_chunk_texts.extend(batch)
 
     # 训练最后一个 chunk
-    train_current_chunk()
+    last_chunk_freq = train_current_chunk()
+    if last_chunk_freq:
+        for token, count in last_chunk_freq.items():
+            all_token_freq[token] = all_token_freq.get(token, 0) + count
 
-    logger.info(f"收集到 {len(all_vocabs)} 个 token，合并为最终词表...")
+    # 从全局候选池择优：每块训练64000，最后从640000候选中选最优64000
+    candidate_count = len(all_vocabs)
+    logger.info(
+        f"全局候选池: {candidate_count:,} 个 unique token (来自 {num_chunks} 块 × {bpe_vocab_size:,})"
+    )
+    logger.info(f"从中择优选择: {bpe_vocab_size:,} 个 token")
 
     # 使用累积频率选择 top tokens
     top_tokens = [t for t, _ in Counter(all_token_freq).most_common(bpe_vocab_size)]
