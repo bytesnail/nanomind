@@ -1,43 +1,37 @@
 #!/usr/bin/env python3
 """Tokenizer 训练脚本.
 
-基于 Qwen3-Next 架构训练 64K 词表的 BPE Tokenizer。
+基于 Qwen3-Next 架构训练 32K 词表的 BPE Tokenizer。
 
 训练步骤:
 1. 从模板加载 pretokenizer/normalizer/decoder 配置
 2. 空白初始化 BPE 模型
-3. 在采样数据上学习 64000 个 BPE 合并规则
-4. 添加 5 个特殊 token（ID 64000-64004）
+3. 在采样数据上学习 32000 个 BPE 合并规则
+4. 添加 5 个特殊 token（ID 32000-32004）
 5. 配置 eos/pad/bos/unk 映射
 
 用法:
-    python scripts/train_tokenizer.py \\
-        --data-dir data/datasets/nanomind_tokenizer \\
-        --template-dir output/qwen3_next_tokenizer \\
-        --output-dir output/tokenizer_64k \\
-        --vocab-size 64005 \\
+    python scripts/train_tokenizer.py \
+        --data-dir data/datasets/nanomind_tokenizer \
+        --template-dir output/qwen3_next_tokenizer \
+        --output-dir output/tokenizer_32k \
+        --vocab-size 32005 \
         --validate
 
 输出:
-    output/tokenizer_64k/
+    output/tokenizer_32k/
     ├── tokenizer.json              # 词表与合并规则
     ├── tokenizer_config.json       # Tokenizer 配置
     ├── special_tokens_map.json     # 特殊 token 映射
     └── vocab.txt                   # 可读词汇表
-
-依赖: tokenizers>=0.22.0, transformers>=4.40.0
 """
 
 from __future__ import annotations
 
 import argparse
 import gc
-import json
 import logging
-import random
 import sys
-from collections import Counter
-from collections.abc import Generator
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -55,21 +49,18 @@ logger = logging.getLogger(__name__)
 # 默认配置
 DEFAULT_DATA_DIR = Path("data/datasets/nanomind_tokenizer")
 DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
-DEFAULT_OUTPUT_DIR = Path("output/tokenizer_64k")
-DEFAULT_VOCAB_SIZE = 64005
-DEFAULT_BATCH_SIZE = 300
-DEFAULT_MIN_FREQUENCY = 4
-DEFAULT_NUM_CHUNKS = 28
-DEFAULT_CHUNK_VOCAB_RATIO = 4
-SHUFFLE_SEED = 42
+DEFAULT_OUTPUT_DIR = Path("output/tokenizer_32k")
+DEFAULT_VOCAB_SIZE = 32005
+DEFAULT_BATCH_SIZE = 200
+DEFAULT_MIN_FREQUENCY = 2
 
-# 特殊 Token 定义（ID 64000-64004）
+# 特殊 Token 定义（ID 32000-32004）
 SPECIAL_TOKENS = [
-    AddedToken("<|endoftext|>", normalized=False, special=True),  # ID 64000
-    AddedToken("<|im_start|>", normalized=False, special=True),  # ID 64001
-    AddedToken("<|im_end|>", normalized=False, special=True),  # ID 64002
-    AddedToken("<|think|>", normalized=False, special=True),  # ID 64003
-    AddedToken("<|/think|>", normalized=False, special=True),  # ID 64004
+    AddedToken("<|endoftext|>", normalized=False, special=True),  # ID 32000
+    AddedToken("<|im_start|>", normalized=False, special=True),  # ID 32001
+    AddedToken("<|im_end|>", normalized=False, special=True),  # ID 32002
+    AddedToken("<|think|>", normalized=False, special=True),  # ID 32003
+    AddedToken("<|/think|>", normalized=False, special=True),  # ID 32004
 ]
 
 SPECIAL_TOKENS_MAP = {
@@ -113,14 +104,14 @@ def load_template_components(template_dir: Path) -> dict:
     return components
 
 
-def get_data_stats(data_dir: Path) -> tuple[int, int]:
-    """获取数据集统计信息。
+def count_dataset_stats(data_dir: Path) -> tuple[int, int]:
+    """统计数据集的总行数和文件数。
 
     Args:
         data_dir: 数据目录
 
     Returns:
-        (总行数, 文件数量)
+        (总行数, 文件数) 的元组
     """
     parquet_files = sorted(data_dir.rglob("*.parquet"))
     if not parquet_files:
@@ -140,22 +131,18 @@ def get_data_stats(data_dir: Path) -> tuple[int, int]:
     return total_rows, len(parquet_files)
 
 
-def batch_iterator(
-    data_dir: Path, batch_size: int = DEFAULT_BATCH_SIZE
-) -> Generator[list[str]]:
-    """流式迭代文本数据（内存安全版）。
-
-    使用 ParquetFile.iter_batches() 逐批次读取，避免 OOM。
+def batch_iterator(data_dir: Path, batch_size: int = DEFAULT_BATCH_SIZE):
+    """流式迭代 parquet 文件中的文本数据。
 
     Args:
         data_dir: 数据目录
-        batch_size: 批次大小
+        batch_size: 每个批次的大小
 
     Yields:
         文本批次的列表
     """
     parquet_files = sorted(data_dir.rglob("*.parquet"))
-    total_rows_yielded = 0
+    batch_count = 0
 
     for fp in tqdm(parquet_files, desc="读取数据", leave=False):
         try:
@@ -163,133 +150,16 @@ def batch_iterator(
             for record_batch in parquet_file.iter_batches(
                 batch_size=batch_size, columns=["text"]
             ):
-                texts = [t for t in record_batch["text"].to_pylist() if t]
-                if texts:
-                    yield texts
-                    total_rows_yielded += len(texts)
-                del record_batch
-            parquet_file.close()
-            gc.collect()
+                batch = [text for text in record_batch["text"].to_pylist() if text]
+                if batch:
+                    yield batch
+                    batch_count += 1
+                    if batch_count % 10 == 0:
+                        gc.collect()
         except Exception as e:
             logger.warning(f"读取文件失败 {fp}: {e}")
 
-    logger.info(f"总计处理 {total_rows_yielded:,} 条文本")
-
-
-def chunked_batch_iterator(
-    data_dir: Path,
-    batch_size: int = DEFAULT_BATCH_SIZE,
-    num_chunks: int = DEFAULT_NUM_CHUNKS,
-    resume_chunk: int = 0,
-) -> Generator[tuple[int, list[str]]]:
-    """分块迭代器，支持断点续训和乱序分块。
-
-    分块前会对文件进行乱序，确保每块包含混合内容类型（英文、中文、代码、数学），
-    避免某一块只包含单一类型数据导致词表偏斜。
-
-    Args:
-        data_dir: 数据目录
-        batch_size: 批次大小
-        num_chunks: 分块数量
-        resume_chunk: 从第几个块开始（断点续训）
-
-    Yields:
-        (chunk_idx, batch) 元组
-    """
-    parquet_files = sorted(data_dir.rglob("*.parquet"))
-    if not parquet_files:
-        raise FileNotFoundError(f"未找到 parquet 文件: {data_dir}")
-
-    rng = random.Random(SHUFFLE_SEED)
-    rng.shuffle(parquet_files)
-    logger.info(f"文件已乱序（种子: {SHUFFLE_SEED}），确保每块包含混合内容类型")
-
-    chunk_size = max(1, len(parquet_files) // num_chunks)
-    total_rows_yielded = 0
-
-    for chunk_idx in range(resume_chunk, num_chunks):
-        start_idx = chunk_idx * chunk_size
-        end_idx = (
-            start_idx + chunk_size if chunk_idx < num_chunks - 1 else len(parquet_files)
-        )
-        chunk_files = parquet_files[start_idx:end_idx]
-
-        chunk_rows = 0
-        batch = []
-        for fp in tqdm(chunk_files, desc=f"块 {chunk_idx + 1}", leave=False):
-            try:
-                parquet_file = pq.ParquetFile(fp)
-                for record_batch in parquet_file.iter_batches(
-                    batch_size=batch_size * 2, columns=["text"]
-                ):
-                    for text in record_batch["text"].to_pylist():
-                        if text:
-                            batch.append(text)
-                            if len(batch) >= batch_size:
-                                yield chunk_idx, batch
-                                chunk_rows += len(batch)
-                                batch = []
-                parquet_file.close()
-                gc.collect()
-            except Exception as e:
-                logger.warning(f"读取文件失败 {fp}: {e}")
-
-        if batch:
-            yield chunk_idx, batch
-            chunk_rows += len(batch)
-
-        logger.info(f"第 {chunk_idx + 1} 块完成，产出 {chunk_rows:,} 条样本")
-        total_rows_yielded += chunk_rows
-
-    logger.info(f"总计处理 {total_rows_yielded:,} 条样本")
-
-
-def save_chunk_vocab(
-    vocab: dict[str, int],
-    chunk_idx: int,
-    checkpoint_dir: Path,
-    token_frequencies: dict[str, int] | None = None,
-) -> Path:
-    """保存词表及可选的频率信息。"""
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    vocab_path = checkpoint_dir / f"vocab_chunk_{chunk_idx}.json"
-
-    data = {"vocab": vocab}
-    if token_frequencies:
-        data["frequencies"] = token_frequencies
-
-    with open(vocab_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.info(f"词表已保存: {vocab_path} ({len(vocab)} tokens)")
-    return vocab_path
-
-
-def load_chunk_vocab(
-    checkpoint_dir: Path, chunk_idx: int
-) -> tuple[dict[str, int], dict[str, int]] | None:
-    """加载词表及频率信息。"""
-    vocab_path = checkpoint_dir / f"vocab_chunk_{chunk_idx}.json"
-    if vocab_path.exists():
-        logger.info(f"加载词表: {vocab_path}")
-        with open(vocab_path, encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict) and "vocab" in data:
-            return data["vocab"], data.get("frequencies", {})
-        # 兼容旧格式
-        return data, {}
-    return None
-
-
-def find_latest_chunk(checkpoint_dir: Path) -> int:
-    if not checkpoint_dir.exists():
-        return -1
-
-    vocab_files = list(checkpoint_dir.glob("vocab_chunk_*.json"))
-    if not vocab_files:
-        return -1
-
-    latest = max(vocab_files, key=lambda p: int(p.stem.split("_")[-1]))
-    return int(latest.stem.split("_")[-1])
+    gc.collect()
 
 
 def train_tokenizer(
@@ -300,28 +170,22 @@ def train_tokenizer(
     validate: bool = False,
     batch_size: int = DEFAULT_BATCH_SIZE,
     min_frequency: int = DEFAULT_MIN_FREQUENCY,
-    num_chunks: int = DEFAULT_NUM_CHUNKS,
-    resume: bool = False,
-    chunk_vocab_ratio: int = DEFAULT_CHUNK_VOCAB_RATIO,
 ) -> None:
-    """训练 BPE tokenizer，使用分块增量训练模式。
+    """训练 BPE tokenizer。
 
     Args:
-        data_dir: 数据目录
+        data_dir: 训练数据目录
         template_dir: 模板 tokenizer 目录
         output_dir: 输出目录
         vocab_size: 词表大小（包含特殊 token）
         validate: 是否执行验证
         batch_size: 数据批次大小
         min_frequency: BPE 最小词频
-        num_chunks: 分块数量
-        resume: 是否从检查点恢复训练
-        chunk_vocab_ratio: 每块词表大小比例，每块训练 vocab_size // ratio
     """
-
-    checkpoint_dir = output_dir / "checkpoints"
+    # 1. 加载模板组件
     components = load_template_components(template_dir)
 
+    # 2. 初始化 BPE tokenizer
     bpe_vocab_size = vocab_size - len(SPECIAL_TOKENS)
     logger.info(f"初始化 BPE tokenizer (词表大小: {bpe_vocab_size})")
 
@@ -330,194 +194,36 @@ def train_tokenizer(
     tokenizer.pre_tokenizer = components.get("pre_tokenizer")
     tokenizer.decoder = components.get("decoder")
 
-    logger.info("使用分块增量训练模式")
-    logger.info(f"分块数: {num_chunks}")
-    logger.info(f"检查点目录: {checkpoint_dir}")
-
-    resume_chunk = 0
-    if resume:
-        resume_chunk = find_latest_chunk(checkpoint_dir) + 1
-        if resume_chunk > 0:
-            logger.info(f"从检查点恢复，从第 {resume_chunk} 块开始")
-
-    if resume_chunk == 0:
-        total_rows, total_files = get_data_stats(data_dir)
-        logger.info(f"数据集: {total_files} 个文件, {total_rows:,} 个样本")
-
-    # 每块训练减小后的词表大小（加速第一阶段），最后从全局候选池择优
-    chunk_vocab_size = bpe_vocab_size // chunk_vocab_ratio
-    logger.info(
-        f"每块训练词表大小: {chunk_vocab_size} (目标 {bpe_vocab_size} // {chunk_vocab_ratio}, "
-        f"从 {num_chunks}×{chunk_vocab_size}={num_chunks * chunk_vocab_size:,} 候选池择优)"
-    )
-
-    all_vocabs: dict[str, int] = {}
-    all_token_freq: dict[str, int] = {}
-    processed_chunks: set[int] = set()
-    current_chunk_idx = None
-    current_chunk_texts = []
-
-    # 断点续训：加载已处理块的频率数据
-    if resume and resume_chunk > 0:
-        logger.info(f"加载已处理块 0-{resume_chunk - 1} 的频率数据...")
-        for prev_chunk_idx in range(resume_chunk):
-            loaded = load_chunk_vocab(checkpoint_dir, prev_chunk_idx)
-            if loaded:
-                vocab, freq = loaded
-                all_vocabs.update(vocab)
-                for token, count in freq.items():
-                    all_token_freq[token] = all_token_freq.get(token, 0) + count
-                processed_chunks.add(prev_chunk_idx)
-        logger.info(
-            f"已加载 {len(processed_chunks)} 个块，累计 {len(all_vocabs)} 个候选 token"
-        )
-
-    def train_current_chunk() -> dict[str, int] | None:
-        """训练当前 chunk 的词表，返回该块的 token 频率统计。"""
-        nonlocal current_chunk_texts, current_chunk_idx
-        if not current_chunk_texts or current_chunk_idx is None:
-            return None
-
-        logger.info(
-            f"训练第 {current_chunk_idx + 1} 块词表 ({len(current_chunk_texts):,} 条文本)..."
-        )
-        chunk_tokenizer = Tokenizer(BPE(unk_token=None))
-        chunk_tokenizer.normalizer = components.get("normalizer")
-        chunk_tokenizer.pre_tokenizer = components.get("pre_tokenizer")
-        chunk_tokenizer.decoder = components.get("decoder")
-
-        chunk_trainer = BpeTrainer(
-            vocab_size=chunk_vocab_size,
-            min_frequency=min_frequency,
-            show_progress=True,
-            special_tokens=[],
-        )
-
-        chunk_tokenizer.train_from_iterator(current_chunk_texts, trainer=chunk_trainer)
-
-        chunk_vocab = chunk_tokenizer.get_vocab()
-
-        # 统计当前 chunk 中各 token 的频率（批处理优化）
-        logger.info(
-            f"统计第 {current_chunk_idx + 1} 块 token 频率 ({len(current_chunk_texts):,} 条文本)..."
-        )
-        token_id_counts = Counter()
-        encode_batch_size = 20
-
-        for batch_start_idx in tqdm(
-            range(0, len(current_chunk_texts), encode_batch_size),
-            desc=f"统计块 {current_chunk_idx + 1} 频率",
-            leave=False,
-        ):
-            encode_batch = current_chunk_texts[
-                batch_start_idx : batch_start_idx + encode_batch_size
-            ]
-            encodings = chunk_tokenizer.encode_batch(encode_batch)
-            for enc in encodings:
-                token_id_counts.update(enc.ids)
-
-        id_to_token_map = {v: k for k, v in chunk_vocab.items()}
-        token_frequencies = {
-            id_to_token_map[tid]: cnt
-            for tid, cnt in token_id_counts.items()
-            if tid in id_to_token_map
-        }
-
-        save_chunk_vocab(
-            chunk_vocab, current_chunk_idx, checkpoint_dir, dict(token_frequencies)
-        )
-        all_vocabs.update(chunk_vocab)
-        processed_chunks.add(current_chunk_idx)
-
-        del chunk_tokenizer, chunk_vocab
-        gc.collect()
-        current_chunk_texts = []
-
-        return token_frequencies
-
-    for chunk_idx, batch in chunked_batch_iterator(
-        data_dir, batch_size, num_chunks, resume_chunk
-    ):
-        if chunk_idx in processed_chunks:
-            continue
-
-        loaded = load_chunk_vocab(checkpoint_dir, chunk_idx)
-        if loaded:
-            vocab, freq = loaded
-            logger.info(f"第 {chunk_idx + 1} 块已处理，跳过")
-            all_vocabs.update(vocab)
-            # 累加频率
-            for token, count in freq.items():
-                all_token_freq[token] = all_token_freq.get(token, 0) + count
-            processed_chunks.add(chunk_idx)
-            continue
-
-        # 切换到新 chunk 时，先训练前一个 chunk
-        if chunk_idx != current_chunk_idx:
-            chunk_freq = train_current_chunk()
-            if chunk_freq:
-                for token, count in chunk_freq.items():
-                    all_token_freq[token] = all_token_freq.get(token, 0) + count
-            current_chunk_idx = chunk_idx
-
-        current_chunk_texts.extend(batch)
-
-    # 训练最后一个 chunk
-    last_chunk_freq = train_current_chunk()
-    if last_chunk_freq:
-        for token, count in last_chunk_freq.items():
-            all_token_freq[token] = all_token_freq.get(token, 0) + count
-
-    # 从全局候选池择优：每块训练64000，最后从640000候选中选最优64000
-    candidate_count = len(all_vocabs)
-    logger.info(
-        f"全局候选池: {candidate_count:,} 个 unique token (来自 {num_chunks} 块 × {bpe_vocab_size:,})"
-    )
-    logger.info(f"从中择优选择: {bpe_vocab_size:,} 个 token")
-
-    # 使用累积频率选择 top tokens
-    top_tokens = [t for t, _ in Counter(all_token_freq).most_common(bpe_vocab_size)]
-
-    final_vocab = {token: idx for idx, token in enumerate(top_tokens)}
-
-    logger.info("=" * 60)
-    logger.info("第二步：用完整数据训练 merges（vocab 固定）")
-    logger.info("=" * 60)
-
-    tokenizer = Tokenizer(BPE(vocab=final_vocab, merges=[], unk_token=None))
-    tokenizer.normalizer = components.get("normalizer")
-    tokenizer.pre_tokenizer = components.get("pre_tokenizer")
-    tokenizer.decoder = components.get("decoder")
-
-    merge_trainer = BpeTrainer(
-        vocab_size=len(final_vocab),
+    # 3. 配置 BPE 训练器
+    trainer = BpeTrainer(
+        vocab_size=bpe_vocab_size,
         min_frequency=min_frequency,
         show_progress=True,
         special_tokens=[],
     )
 
-    total_rows, _ = get_data_stats(data_dir)
+    # 4. 获取数据统计信息
+    total_rows, total_files = count_dataset_stats(data_dir)
+    logger.info(f"开始训练 ({total_files} 个文件, {total_rows:,} 个样本)")
 
+    # 5. 流式训练
     tokenizer.train_from_iterator(
         batch_iterator(data_dir, batch_size),
-        trainer=merge_trainer,
+        trainer=trainer,
         length=total_rows,
     )
 
-    logger.info(f"Merges 训练完成，词表大小: {tokenizer.get_vocab_size()}")
+    logger.info(f"BPE 训练完成，词表大小: {tokenizer.get_vocab_size()}")
 
-    # 6. 添加特殊 token（强制指定 ID）
-    # 由于 tokenizers 库会在现有词表末尾添加新 token，
-    # 我们需要确保 BPE 词表正好是 64000 个，然后添加 5 个特殊 token
-    current_vocab_size = tokenizer.get_vocab_size()
-    logger.info(f"当前词表大小: {current_vocab_size}")
+    # 6. 添加特殊 token
+    logger.info(f"当前词表大小: {tokenizer.get_vocab_size()}")
 
     num_added = tokenizer.add_tokens(SPECIAL_TOKENS)
     logger.info(f"添加 {num_added} 个特殊 token")
 
     # 验证特殊 token ID
     for i, token in enumerate(SPECIAL_TOKENS):
-        token_str = str(token).lstrip('AddedToken("').rstrip('")')
+        token_str = token.content
         token_id = tokenizer.token_to_id(token_str)
         expected_id = bpe_vocab_size + i
         if token_id != expected_id:
@@ -544,10 +250,8 @@ def train_tokenizer(
         pad_token=SPECIAL_TOKENS_MAP["pad_token"],
     )
 
-    # 添加额外特殊 token 标记
-    additional_special_tokens = ["<|im_start|>", "<|think|>", "<|/think|>"]
     hf_tokenizer.add_special_tokens(
-        {"additional_special_tokens": additional_special_tokens}
+        {"additional_special_tokens": [t.content for t in SPECIAL_TOKENS[1:]]}
     )
 
     # 10. 保存完整配置
@@ -604,22 +308,17 @@ def validate_tokenizer(output_dir: Path, expected_vocab_size: int) -> bool:
         logger.info(f"✓ 词表大小: {actual_vocab_size}")
 
     # 2. 验证特殊 token ID
-    special_token_ids = {
-        "<|endoftext|>": 64000,
-        "<|im_start|>": 64001,
-        "<|im_end|>": 64002,
-        "<|think|>": 64003,
-        "<|/think|>": 64004,
-    }
-
-    for token, expected_id in special_token_ids.items():
-        actual_id = tokenizer.convert_tokens_to_ids(token)
+    base_vocab_size = expected_vocab_size - len(SPECIAL_TOKENS)
+    for i, token in enumerate(SPECIAL_TOKENS):
+        token_str = token.content
+        expected_id = base_vocab_size + i
+        actual_id = tokenizer.convert_tokens_to_ids(token_str)
         if actual_id != expected_id:
             errors.append(
-                f"Token '{token}' ID 不匹配: 期望 {expected_id}, 实际 {actual_id}"
+                f"Token '{token_str}' ID 不匹配: 期望 {expected_id}, 实际 {actual_id}"
             )
         else:
-            logger.info(f"✓ {token}: ID {actual_id}")
+            logger.info(f"✓ {token_str}: ID {actual_id}")
 
     # 3. 验证特殊 token 映射
     if tokenizer.pad_token != "<|endoftext|>":
@@ -666,7 +365,7 @@ def validate_tokenizer(output_dir: Path, expected_vocab_size: int) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="训练 BPE Tokenizer - 基于 Qwen3-Next 架构训练 64K 词表",
+        description="训练 BPE Tokenizer - 基于 Qwen3-Next 架构训练 32K 词表",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -674,20 +373,15 @@ def main() -> int:
   python scripts/train_tokenizer.py
 
   # 指定参数并验证
-  python scripts/train_tokenizer.py \\
-      --data-dir data/datasets/nanomind_tokenizer \\
-      --template-dir output/qwen3_next_tokenizer \\
-      --output-dir output/tokenizer_64k \\
-      --vocab-size 64005 \\
+  python scripts/train_tokenizer.py \
+      --data-dir data/datasets/nanomind_tokenizer \
+      --template-dir output/qwen3_next_tokenizer \
+      --output-dir output/tokenizer_32k \
+      --vocab-size 32005 \
       --validate
 
   # 调整批次大小（内存优化）
   python scripts/train_tokenizer.py --batch-size 5000
-
-依赖版本:
-  tokenizers>=0.22.0
-  transformers>=4.40.0
-  pyarrow>=15.0.0
         """,
     )
 
@@ -738,23 +432,6 @@ def main() -> int:
         action="store_true",
         help="训练后执行验证",
     )
-    parser.add_argument(
-        "--num-chunks",
-        type=int,
-        default=DEFAULT_NUM_CHUNKS,
-        help=f"分块数量 (默认: {DEFAULT_NUM_CHUNKS})",
-    )
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="从检查点恢复训练",
-    )
-    parser.add_argument(
-        "--chunk-vocab-ratio",
-        type=int,
-        default=DEFAULT_CHUNK_VOCAB_RATIO,
-        help=f"每块词表大小比例 (每块训练 vocab_size // ratio，默认: {DEFAULT_CHUNK_VOCAB_RATIO})",
-    )
 
     args = parser.parse_args()
 
@@ -778,9 +455,6 @@ def main() -> int:
     logger.info(f"批次大小: {args.batch_size}")
     logger.info(f"最小词频: {args.min_frequency}")
     logger.info(f"验证模式: {args.validate}")
-    logger.info(f"分块数: {args.num_chunks}")
-    logger.info(f"恢复训练: {args.resume}")
-    logger.info(f"每块词表比例: 1/{args.chunk_vocab_ratio}")
     logger.info("=" * 60)
 
     try:
@@ -792,9 +466,6 @@ def main() -> int:
             validate=args.validate,
             batch_size=args.batch_size,
             min_frequency=args.min_frequency,
-            num_chunks=args.num_chunks,
-            resume=args.resume,
-            chunk_vocab_ratio=args.chunk_vocab_ratio,
         )
         logger.info("训练完成！")
         return 0
