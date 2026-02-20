@@ -34,6 +34,7 @@ import argparse
 import gc
 import json
 import logging
+import random
 import sys
 from collections import Counter
 from collections.abc import Generator
@@ -58,7 +59,8 @@ DEFAULT_OUTPUT_DIR = Path("output/tokenizer_64k")
 DEFAULT_VOCAB_SIZE = 64005
 DEFAULT_BATCH_SIZE = 1000
 DEFAULT_MIN_FREQUENCY = 2
-DEFAULT_NUM_CHUNKS = 10
+DEFAULT_NUM_CHUNKS = 8
+SHUFFLE_SEED = 42
 
 # 特殊 Token 定义（ID 64000-64004）
 SPECIAL_TOKENS = [
@@ -179,7 +181,10 @@ def chunked_batch_iterator(
     num_chunks: int = DEFAULT_NUM_CHUNKS,
     resume_chunk: int = 0,
 ) -> Generator[tuple[int, list[str]]]:
-    """分块迭代器，支持断点续训。
+    """分块迭代器，支持断点续训和乱序分块。
+
+    分块前会对文件进行乱序，确保每块包含混合内容类型（英文、中文、代码、数学），
+    避免某一块只包含单一类型数据导致词表偏斜。
 
     Args:
         data_dir: 数据目录
@@ -193,6 +198,10 @@ def chunked_batch_iterator(
     parquet_files = sorted(data_dir.rglob("*.parquet"))
     if not parquet_files:
         raise FileNotFoundError(f"未找到 parquet 文件: {data_dir}")
+
+    rng = random.Random(SHUFFLE_SEED)
+    rng.shuffle(parquet_files)
+    logger.info(f"文件已乱序（种子: {SHUFFLE_SEED}），确保每块包含混合内容类型")
 
     chunk_size = max(1, len(parquet_files) // num_chunks)
     total_rows_yielded = 0
@@ -293,19 +302,7 @@ def train_tokenizer(
     num_chunks: int = DEFAULT_NUM_CHUNKS,
     resume: bool = False,
 ) -> None:
-    """训练 BPE tokenizer，使用分块增量训练模式。
-
-    Args:
-        data_dir: 训练数据目录
-        template_dir: 模板 tokenizer 目录
-        output_dir: 输出目录
-        vocab_size: 词表大小（包含特殊 token）
-        validate: 是否执行验证
-        batch_size: 数据批次大小
-        min_frequency: BPE 最小词频
-        num_chunks: 数据分块数量
-        resume: 是否从检查点恢复
-    """
+    """训练 BPE tokenizer，使用分块增量训练模式。"""
     checkpoint_dir = output_dir / "checkpoints"
     components = load_template_components(template_dir)
 
