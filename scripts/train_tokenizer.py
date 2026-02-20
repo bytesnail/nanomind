@@ -385,9 +385,9 @@ def train_tokenizer(
 
         id_to_token_map = {v: k for k, v in chunk_vocab.items()}
         token_frequencies = {
-            id_to_token_map[token_id]: freq
-            for token_id, freq in token_id_counts.items()
-            if token_id in id_to_token_map
+            id_to_token_map[tid]: cnt
+            for tid, cnt in token_id_counts.items()
+            if tid in id_to_token_map
         }
 
         save_chunk_vocab(
