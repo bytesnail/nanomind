@@ -57,9 +57,10 @@ DEFAULT_DATA_DIR = Path("data/datasets/nanomind_tokenizer")
 DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
 DEFAULT_OUTPUT_DIR = Path("output/tokenizer_64k")
 DEFAULT_VOCAB_SIZE = 64005
-DEFAULT_BATCH_SIZE = 1000
-DEFAULT_MIN_FREQUENCY = 2
-DEFAULT_NUM_CHUNKS = 8
+DEFAULT_BATCH_SIZE = 300
+DEFAULT_MIN_FREQUENCY = 4
+DEFAULT_NUM_CHUNKS = 28
+DEFAULT_CHUNK_VOCAB_RATIO = 4
 SHUFFLE_SEED = 42
 
 # 特殊 Token 定义（ID 64000-64004）
@@ -301,8 +302,23 @@ def train_tokenizer(
     min_frequency: int = DEFAULT_MIN_FREQUENCY,
     num_chunks: int = DEFAULT_NUM_CHUNKS,
     resume: bool = False,
+    chunk_vocab_ratio: int = DEFAULT_CHUNK_VOCAB_RATIO,
 ) -> None:
-    """训练 BPE tokenizer，使用分块增量训练模式。"""
+    """训练 BPE tokenizer，使用分块增量训练模式。
+
+    Args:
+        data_dir: 数据目录
+        template_dir: 模板 tokenizer 目录
+        output_dir: 输出目录
+        vocab_size: 词表大小（包含特殊 token）
+        validate: 是否执行验证
+        batch_size: 数据批次大小
+        min_frequency: BPE 最小词频
+        num_chunks: 分块数量
+        resume: 是否从检查点恢复训练
+        chunk_vocab_ratio: 每块词表大小比例，每块训练 vocab_size // ratio
+    """
+
     checkpoint_dir = output_dir / "checkpoints"
     components = load_template_components(template_dir)
 
@@ -328,9 +344,12 @@ def train_tokenizer(
         total_rows, total_files = get_data_stats(data_dir)
         logger.info(f"数据集: {total_files} 个文件, {total_rows:,} 个样本")
 
-    # 每块训练完整的词表大小，最后从全局候选池择优
-    chunk_vocab_size = bpe_vocab_size
-    logger.info(f"每块训练词表大小: {chunk_vocab_size} (从全局候选池择优)")
+    # 每块训练减小后的词表大小（加速第一阶段），最后从全局候选池择优
+    chunk_vocab_size = bpe_vocab_size // chunk_vocab_ratio
+    logger.info(
+        f"每块训练词表大小: {chunk_vocab_size} (目标 {bpe_vocab_size} // {chunk_vocab_ratio}, "
+        f"从 {num_chunks}×{chunk_vocab_size}={num_chunks * chunk_vocab_size:,} 候选池择优)"
+    )
 
     all_vocabs: dict[str, int] = {}
     all_token_freq: dict[str, int] = {}
@@ -383,7 +402,7 @@ def train_tokenizer(
             f"统计第 {current_chunk_idx + 1} 块 token 频率 ({len(current_chunk_texts):,} 条文本)..."
         )
         token_id_counts = Counter()
-        encode_batch_size = 10000
+        encode_batch_size = 20
 
         for batch_start_idx in tqdm(
             range(0, len(current_chunk_texts), encode_batch_size),
@@ -730,6 +749,12 @@ def main() -> int:
         action="store_true",
         help="从检查点恢复训练",
     )
+    parser.add_argument(
+        "--chunk-vocab-ratio",
+        type=int,
+        default=DEFAULT_CHUNK_VOCAB_RATIO,
+        help=f"每块词表大小比例 (每块训练 vocab_size // ratio，默认: {DEFAULT_CHUNK_VOCAB_RATIO})",
+    )
 
     args = parser.parse_args()
 
@@ -755,6 +780,7 @@ def main() -> int:
     logger.info(f"验证模式: {args.validate}")
     logger.info(f"分块数: {args.num_chunks}")
     logger.info(f"恢复训练: {args.resume}")
+    logger.info(f"每块词表比例: 1/{args.chunk_vocab_ratio}")
     logger.info("=" * 60)
 
     try:
@@ -768,6 +794,7 @@ def main() -> int:
             min_frequency=args.min_frequency,
             num_chunks=args.num_chunks,
             resume=args.resume,
+            chunk_vocab_ratio=args.chunk_vocab_ratio,
         )
         logger.info("训练完成！")
         return 0
