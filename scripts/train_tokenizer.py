@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """Tokenizer 训练脚本.
 
-基于 Qwen3-Next 架构训练 32K 词表的 BPE Tokenizer。
+基于 Qwen3-Next 架构训练 24K 词表的 BPE Tokenizer。
 
 训练步骤:
 1. 从模板加载 pretokenizer/normalizer/decoder 配置
 2. 空白初始化 BPE 模型
-3. 在采样数据上学习 32000 个 BPE 合并规则
-4. 添加 5 个特殊 token（ID 32000-32004）
+3. 在采样数据上学习 24000 个 BPE 合并规则
+4. 添加 5 个特殊 token（ID 24000-24004）
 5. 配置 eos/pad/bos/unk 映射
 
 用法:
     python scripts/train_tokenizer.py \
         --data-dir data/datasets/nanomind_tokenizer \
         --template-dir output/qwen3_next_tokenizer \
-        --output-dir output/tokenizer_32k \
-        --vocab-size 32005 \
+        --output-dir output/tokenizer_24k \
+        --vocab-size 24005 \
         --validate
 
 输出:
-    output/tokenizer_32k/
+    output/tokenizer_24k/
     ├── tokenizer.json              # 词表与合并规则
     ├── tokenizer_config.json       # Tokenizer 配置
     ├── special_tokens_map.json     # 特殊 token 映射
@@ -49,18 +49,18 @@ logger = logging.getLogger(__name__)
 # 默认配置
 DEFAULT_DATA_DIR = Path("data/datasets/nanomind_tokenizer")
 DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
-DEFAULT_OUTPUT_DIR = Path("output/tokenizer_32k")
-DEFAULT_VOCAB_SIZE = 32005
+DEFAULT_OUTPUT_DIR = Path("output/tokenizer_24k")
+DEFAULT_VOCAB_SIZE = 24005
 DEFAULT_BATCH_SIZE = 200
 DEFAULT_MIN_FREQUENCY = 2
 
-# 特殊 Token 定义（ID 32000-32004）
+# 特殊 Token 定义（ID 24000-24004）
 SPECIAL_TOKENS = [
-    AddedToken("<|endoftext|>", normalized=False, special=True),  # ID 32000
-    AddedToken("<|im_start|>", normalized=False, special=True),  # ID 32001
-    AddedToken("<|im_end|>", normalized=False, special=True),  # ID 32002
-    AddedToken("<|think|>", normalized=False, special=True),  # ID 32003
-    AddedToken("<|/think|>", normalized=False, special=True),  # ID 32004
+    AddedToken("<|endoftext|>", normalized=False, special=True),  # ID 24000
+    AddedToken("<|im_start|>", normalized=False, special=True),  # ID 24001
+    AddedToken("<|im_end|>", normalized=False, special=True),  # ID 24002
+    AddedToken("<|think|>", normalized=False, special=True),  # ID 24003
+    AddedToken("<|/think|>", normalized=False, special=True),  # ID 24004
 ]
 
 SPECIAL_TOKENS_MAP = {
@@ -365,7 +365,7 @@ def validate_tokenizer(output_dir: Path, expected_vocab_size: int) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="训练 BPE Tokenizer - 基于 Qwen3-Next 架构训练 32K 词表",
+        description="训练 BPE Tokenizer - 基于 Qwen3-Next 架构训练 24K 词表",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -376,8 +376,8 @@ def main() -> int:
   python scripts/train_tokenizer.py \
       --data-dir data/datasets/nanomind_tokenizer \
       --template-dir output/qwen3_next_tokenizer \
-      --output-dir output/tokenizer_32k \
-      --vocab-size 32005 \
+      --output-dir output/tokenizer_24k \
+      --vocab-size 24005 \
       --validate
 
   # 调整批次大小（内存优化）
