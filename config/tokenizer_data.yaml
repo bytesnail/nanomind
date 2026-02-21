@@ -2,20 +2,6 @@ datasets:
   fineweb_en:
     name: "fineweb_edu_en"
     source: "data/datasets/fineweb/en"
-    samples: 12000000
-    buckets:
-      4.0:
-        count: 5400000
-      3.5:
-        count: 2400000
-      3.0:
-        count: 2400000
-      2.5:
-        count: 1800000
-
-  fineweb_zh:
-    name: "fineweb_edu_zh"
-    source: "data/datasets/fineweb/zh"
     samples: 10000000
     buckets:
       4.0:
@@ -26,6 +12,20 @@ datasets:
         count: 2000000
       2.5:
         count: 1500000
+
+  fineweb_zh:
+    name: "fineweb_edu_zh"
+    source: "data/datasets/fineweb/zh"
+    samples: 12000000
+    buckets:
+      4.0:
+        count: 5400000
+      3.5:
+        count: 2400000
+      3.0:
+        count: 2400000
+      2.5:
+        count: 1800000
 
   github_code:
     name: "github_code"
@@ -45,9 +45,9 @@ datasets:
       4plus:
         count: 3000000
       4plus_MIND:
-        count: 1920000
+        count: 2000000
       3:
-        count: 1080000
+        count: 1000000
 
 random_seed: 42
 output_format: "parquet"
