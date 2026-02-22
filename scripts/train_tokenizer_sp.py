@@ -161,7 +161,7 @@ def train_sentencepiece(
     output_dir: Path,
     vocab_size: int = 32000,
     model_prefix: str = "tokenizer",
-    num_threads: int = 16,
+    num_threads: int = 32,
 ) -> Path:
     """
     使用 spm_train 训练 SentencePiece 模型
@@ -212,8 +212,8 @@ def train_sentencepiece(
         "--input_sentence_size=0",  # 0 = 不限制，使用全部语料
         "--shuffle_input_sentence=true",
         # 控制词表大小
-        "--seed_sentencepiece_size=200000",
-        "--mining_sentence_size=200000",
+        "--seed_sentencepiece_size=500000",
+        "--mining_sentence_size=5000000",
         "--shrinking_factor=0.75",
     ]
 
@@ -260,7 +260,7 @@ def main(
     output_dir: Path,
     work_dir: Path | None = None,
     vocab_size: int = 32000,
-    num_threads: int = 16,
+    num_threads: int = 32,
     skip_export: bool = False,
 ) -> Path:
     """
