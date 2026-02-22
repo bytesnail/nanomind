@@ -20,7 +20,7 @@ import argparse
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from transformers import AutoTokenizer
 
@@ -216,11 +216,11 @@ def compare_tokenizers(
 
     # 加载 tokenizer
     logger.info("\n加载 tokenizer...")
-    tok_ours = AutoTokenizer.from_pretrained(ours_dir, trust_remote_code=True)
+    tok_ours = cast(PreTrainedTokenizer, cast(object, AutoTokenizer.from_pretrained(ours_dir, trust_remote_code=True)))
     logger.info(f"  ✓ 我们的 tokenizer ({ours_dir})")
     logger.info(f"    词表大小: {tok_ours.vocab_size}")
 
-    tok_qwen3 = AutoTokenizer.from_pretrained(qwen3_dir, trust_remote_code=True)
+    tok_qwen3 = cast(PreTrainedTokenizer, cast(object, AutoTokenizer.from_pretrained(qwen3_dir, trust_remote_code=True)))
     logger.info(f"  ✓ qwen3 tokenizer ({qwen3_dir})")
     logger.info(f"    词表大小: {tok_qwen3.vocab_size}")
 
@@ -312,7 +312,7 @@ def test_compression_ratio(
     logger.info("压缩率测试")
     logger.info("=" * 60)
 
-    tok = AutoTokenizer.from_pretrained(ours_dir, trust_remote_code=True)
+    tok = cast(PreTrainedTokenizer, cast(object, AutoTokenizer.from_pretrained(ours_dir, trust_remote_code=True)))
 
     if test_file and test_file.exists():
         text = test_file.read_text(encoding="utf-8")

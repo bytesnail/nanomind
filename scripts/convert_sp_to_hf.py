@@ -16,7 +16,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from tokenizers import (
     Tokenizer,
@@ -25,9 +25,6 @@ from tokenizers import (
     processors,
 )
 from tokenizers.models import BPE
-
-if TYPE_CHECKING:
-    from sentencepiece import SentencePieceProcessor
 
 
 logging.basicConfig(
@@ -69,12 +66,12 @@ QWEN3_SPECIAL_TOKENS: tuple[str, ...] = (
 )
 
 
-def _load_sp_model(sp_model_path: Path) -> "SentencePieceProcessor":
+def _load_sp_model(sp_model_path: Path):
     """加载 SentencePiece 模型。"""
-    from sentencepiece import SentencePieceProcessor as SPP
+    from sentencepiece import SentencePieceProcessor
 
-    processor = SPP()
-    processor.load(str(sp_model_path))
+    processor = SentencePieceProcessor()
+    processor.load(str(sp_model_path))  # type: ignore[attr-defined]
     return processor
 
 
@@ -115,7 +112,7 @@ def convert_sp_to_hf_bpe(
     vocab: dict[str, int] = {}
     sp_vocab_size = sp.vocab_size()
     for i in range(min(vocab_size, sp_vocab_size)):
-        token = sp.id_to_piece(i)
+        token = sp.id_to_piece(i)  # type: ignore[attr-defined]
         vocab[token] = i
 
     logger.info(f"基础词表大小: {len(vocab)}")

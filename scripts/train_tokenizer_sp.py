@@ -129,7 +129,7 @@ def export_to_text_streaming(
             text = doc.get("text", "")
 
             # 只去除首尾空白，保留内部所有字符（包括换行符）
-            text = text.strip()
+            text = str(text).strip()
 
             if not text:
                 empty_docs += 1
