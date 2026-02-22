@@ -683,6 +683,8 @@ scikit-learn==1.8.0
     #   sklearn-crfsuite
 scipy==1.17.0
     # via scikit-learn
+sentencepiece==0.2.1
+    # via nanomind (pyproject.toml)
 setuptools==80.10.2
     # via
     #   fasttext-numpy2-wheel
@@ -807,7 +809,7 @@ tqdm==4.67.3
     #   transformers
 trafilatura==1.11.0
     # via datatrove
-transformers==5.1.0
+transformers==5.2.0
     # via nanomind (pyproject.toml)
 triton==3.6.0
     # via torch
