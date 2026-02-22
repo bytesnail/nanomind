@@ -68,6 +68,63 @@ RANDOMIZE_START_DURATION = 5
 
 HASH_MODULUS = 2**64
 
+# GitHub Code 数据集：扩展名到语言名称的映射
+LANGUAGE_EXTENSIONS: dict[str, str] = {
+    # C
+    ".c": "c",
+    ".h": "c",
+    # C++
+    ".cpp": "cpp",
+    ".hpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hxx": "cpp",
+    # Python
+    ".py": "python",
+    ".pyw": "python",
+    ".pyi": "python",
+    # Rust
+    ".rs": "rust",
+    # HTML
+    ".html": "html",
+    ".htm": "html",
+    ".xhtml": "html",
+    # CSS
+    ".css": "css",
+    ".scss": "css",
+    ".sass": "css",
+    ".less": "css",
+    # JavaScript
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    # TypeScript
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".mts": "typescript",
+    ".cts": "typescript",
+    # Markdown
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".mkd": "markdown",
+    # JSON
+    ".json": "json",
+    ".jsonc": "json",
+    ".jsonl": "json",
+    # XML
+    ".xml": "xml",
+    ".xsl": "xml",
+    ".xslt": "xml",
+    ".svg": "xml",
+    ".wsdl": "xml",
+    # TOML
+    ".toml": "toml",
+}
+
+# 允许的扩展名集合（从 LANGUAGE_EXTENSIONS 派生）
+ALLOWED_LANGUAGES: set[str] = set(LANGUAGE_EXTENSIONS.keys())
+
 
 @dataclass
 class SamplingConfig:
@@ -296,6 +353,44 @@ class IndexFilter(PipelineStep):
                 self.stat_update("filtered", value=1)
 
 
+class LanguageTagger(PipelineStep):
+    """根据文件扩展名过滤并标记编程语言。
+
+    只对 github_code 数据集生效，为通过的文档添加 language 字段。
+    """
+
+    name = "Language Tagger"
+    type = "🏷️ - LANG"
+
+    def __init__(self, allowed_extensions: set[str]):
+        super().__init__()
+        self.allowed_extensions = {ext.lower() for ext in allowed_extensions}
+
+    @staticmethod
+    def _get_file_extension(file_path: str) -> str | None:
+        if not file_path:
+            return None
+        ext = Path(file_path).suffix.lower()
+        return ext if ext else None
+
+    def run(
+        self,
+        data: Iterator[Document],
+        rank: int = 0,
+        world_size: int = 1,
+    ) -> Iterator[Document]:
+        for doc in data:
+            original_file_path = doc.metadata.get("file_path", "")
+            ext = self._get_file_extension(original_file_path)
+
+            if ext and ext in self.allowed_extensions:
+                doc.metadata["language"] = LANGUAGE_EXTENSIONS.get(ext, "unknown")
+                self.stat_update("tagged", value=1)
+                yield doc
+            else:
+                self.stat_update("filtered", value=1)
+
+
 class SourceTagger(PipelineStep):
     name = "Source Tagger"
     type = "🏷️ - TAGGER"
@@ -330,6 +425,7 @@ class TokenizerDataWriter(PipelineStep):
         max_rows_per_file: int = DEFAULT_MAX_ROWS,
         buffer_size: int = DEFAULT_BATCH_SIZE,
         compression: str = COMPRESSION,
+        include_language: bool = False,
     ):
         super().__init__()
         self.output_dir = Path(output_dir)
@@ -338,6 +434,7 @@ class TokenizerDataWriter(PipelineStep):
         self.max_rows_per_file = max_rows_per_file
         self.buffer_size = buffer_size
         self.compression = compression
+        self.include_language = include_language
 
         self._buffer: list[dict] = []
         self._batch_counter = 0
@@ -350,14 +447,17 @@ class TokenizerDataWriter(PipelineStep):
         if not batch:
             return
 
-        table = pa.table(
-            {
-                "id": [doc["id"] for doc in batch],
-                "text": [doc["text"] for doc in batch],
-                "source_dataset": [doc["source_dataset"] for doc in batch],
-                "source_bucket": [doc["source_bucket"] for doc in batch],
-            }
-        )
+        table_data = {
+            "id": [doc["id"] for doc in batch],
+            "text": [doc["text"] for doc in batch],
+            "source_dataset": [doc["source_dataset"] for doc in batch],
+            "source_bucket": [doc["source_bucket"] for doc in batch],
+        }
+
+        if self.include_language:
+            table_data["language"] = [doc.get("language", "unknown") for doc in batch]
+
+        table = pa.table(table_data)
 
         filename = f"{self.dataset_name}-{self.bucket_name}-{self._batch_counter:05d}-rank-{rank:05d}.parquet"
         output_path = self.output_dir / filename
@@ -373,20 +473,23 @@ class TokenizerDataWriter(PipelineStep):
         self,
         data: Iterator[Document],
         rank: int = 0,
-        world_size: int = 1,  # noqa: ARG002
+        world_size: int = 1,
     ) -> None:
         batch: list[dict] = []
         batch_count = 0
 
         for doc in data:
-            batch.append(
-                {
-                    "id": doc.id,
-                    "text": doc.text,
-                    "source_dataset": doc.metadata.get("source_dataset", "unknown"),
-                    "source_bucket": doc.metadata.get("source_bucket", "unknown"),
-                }
-            )
+            batch_item = {
+                "id": doc.id,
+                "text": doc.text,
+                "source_dataset": doc.metadata.get("source_dataset", "unknown"),
+                "source_bucket": doc.metadata.get("source_bucket", "unknown"),
+            }
+
+            if self.include_language:
+                batch_item["language"] = doc.metadata.get("language", "unknown")
+
+            batch.append(batch_item)
 
             if len(batch) >= self.buffer_size:
                 self._write_batch(batch, rank=rank)
@@ -419,7 +522,7 @@ def get_parquet_files(source_dir: Path, bucket_name: str) -> list[Path]:
 
 
 def count_total_rows_fast(files: list[Path]) -> int:
-    """快速统计所有文件的行数（使用元数据，不读取数据）。"""
+    """快速统计所有文件的行数（使用元数据，不读取数据）."""
     total = 0
     for fp in files:
         try:
@@ -447,7 +550,7 @@ def print_sample_texts(
     max_samples: int = 2,
     max_text_length: int = 80,
 ) -> None:
-    """打印样本内容的所有字段（一行一条，text字段截断）。
+    """打印样本内容的所有字段（一行一条，text字段截断）.
 
     Args:
         output_dir: 输出目录
@@ -568,22 +671,32 @@ def _process_full(
     bucket_dir = find_bucket_dir(files, bucket_name)
     row_idx_adapter = create_row_index_adapter(text_column)
 
-    pipeline = [
+    pipeline: list[PipelineStep] = [
         ParquetReader(
             data_folder=str(bucket_dir),
             glob_pattern="**/*.parquet",
             text_key=text_column,
             adapter=row_idx_adapter,
         ),
-        SourceTagger(dataset_name=dataset_name, bucket_name=bucket_name),
-        TokenizerDataWriter(
-            output_dir=str(output_dir),
-            dataset_name=dataset_name,
-            bucket_name=bucket_name,
-            max_rows_per_file=max_rows_per_file,
-            buffer_size=buffer_size,
-        ),
     ]
+
+    # 对 github_code 数据集添加语言过滤器
+    if "github" in dataset_name.lower():
+        pipeline.append(LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES))
+
+    pipeline.extend(
+        [
+            SourceTagger(dataset_name=dataset_name, bucket_name=bucket_name),
+            TokenizerDataWriter(
+                output_dir=str(output_dir),
+                dataset_name=dataset_name,
+                bucket_name=bucket_name,
+                max_rows_per_file=max_rows_per_file,
+                buffer_size=buffer_size,
+                include_language="github" in dataset_name.lower(),
+            ),
+        ]
+    )
 
     actual_tasks = calculate_tasks(tasks, workers, len(files))
 
@@ -628,7 +741,7 @@ def _process_sampled(
     bucket_dir = find_bucket_dir(files, bucket_name)
     row_idx_adapter = create_row_index_adapter(text_column)
 
-    pipeline = [
+    pipeline: list[PipelineStep] = [
         ParquetReader(
             data_folder=str(bucket_dir),
             glob_pattern="**/*.parquet",
@@ -636,15 +749,25 @@ def _process_sampled(
             adapter=row_idx_adapter,
         ),
         IndexFilter(indices=indices),
-        SourceTagger(dataset_name=dataset_name, bucket_name=bucket_name),
-        TokenizerDataWriter(
-            output_dir=str(output_dir),
-            dataset_name=dataset_name,
-            bucket_name=bucket_name,
-            max_rows_per_file=max_rows_per_file,
-            buffer_size=min(selected_count, buffer_size),
-        ),
     ]
+
+    # 对 github_code 数据集添加语言过滤器
+    if "github" in dataset_name.lower():
+        pipeline.append(LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES))
+
+    pipeline.extend(
+        [
+            SourceTagger(dataset_name=dataset_name, bucket_name=bucket_name),
+            TokenizerDataWriter(
+                output_dir=str(output_dir),
+                dataset_name=dataset_name,
+                bucket_name=bucket_name,
+                max_rows_per_file=max_rows_per_file,
+                buffer_size=min(selected_count, buffer_size),
+                include_language="github" in dataset_name.lower(),
+            ),
+        ]
+    )
 
     actual_tasks = calculate_tasks(tasks, workers, selected_count)
 
@@ -669,7 +792,7 @@ def process_dataset(
     max_rows_per_file: int,
     buffer_size: int,
 ) -> dict[str, Any]:
-    """处理单个数据集的所有桶。"""
+    """处理单个数据集的所有桶."""
     logger.info(f"处理数据集 [{source_key}]: {config.name}")
     logger.info(f"  源目录: {config.source}")
 
@@ -722,7 +845,7 @@ def process_dataset(
 
 
 def save_sampling_info(info: SamplingInfo, output_dir: Path) -> Path:
-    """保存采样信息到 JSON 文件。"""
+    """保存采样信息到 JSON 文件."""
     output_dir.mkdir(parents=True, exist_ok=True)
     info_path = output_dir / "sampling_info.json"
 
@@ -741,7 +864,7 @@ def save_sampling_info(info: SamplingInfo, output_dir: Path) -> Path:
 
 
 def _log_section(title: str, width: int = 60) -> None:
-    """记录带分隔线的章节标题。"""
+    """记录带分隔线的章节标题."""
     logger.info("=" * width)
     logger.info(title)
     logger.info("=" * width)
@@ -754,7 +877,7 @@ def _log_config_info(
     max_rows: int,
     buffer_size: int,
 ) -> None:
-    """记录配置信息。"""
+    """记录配置信息."""
     _log_section("准备 Tokenizer 训练数据 (Datatrove 优化版)")
     logger.info(f"配置文件: {CONFIG_PATH}")
     logger.info(f"输出目录: {config.output_dir}")
@@ -772,7 +895,7 @@ def prepare_tokenizer_data(
     max_rows_per_file: int = DEFAULT_MAX_ROWS,
     buffer_size: int = DEFAULT_BATCH_SIZE,
 ) -> int:
-    """主函数：准备 tokenizer 训练数据。"""
+    """主函数：准备 tokenizer 训练数据."""
     try:
         config = load_config(CONFIG_PATH)
         _log_config_info(config, workers, tasks, max_rows_per_file, buffer_size)

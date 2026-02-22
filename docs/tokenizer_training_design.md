@@ -1,8 +1,8 @@
 # Tokenizer 训练设计文档
 
-> **目标**: 训练与 Qwen3-Next 兼容的 64K 词表 BPE Tokenizer  
-> **训练样本**: 40M 多领域混合数据  
-> **更新日期**: 2026-02-16
+> **目标**: 训练与 Qwen3-Next 兼容的 32K 词表 BPE Tokenizer  
+> **训练样本**: 800K 多领域混合数据  
+> **更新日期**: 2026-02-22
 
 ---
 
@@ -30,9 +30,9 @@
 
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
-| **总词表大小** | 64005 | ID 0-64004（训练时使用 `--vocab-size 64005`） |
-| **BPE tokens** | 64000 | 从数据学习（ID 0-63999） |
-| **特殊 tokens** | 5 | 手动定义（ID 64000-64004） |
+| **总词表大小** | 32005 | ID 0-32004（训练时使用 `--vocab-size 32005`） |
+| **BPE tokens** | 32000 | 从数据学习（ID 0-31999） |
+| **特殊 tokens** | 5 | 手动定义（ID 32000-32004） |
 | **算法** | BPE | Byte Pair Encoding |
 | **BPE 最小词频** | 2 | min_frequency |
 | **基础架构** | Qwen3-Next | 复制 pretokenizer/normalizer/decoder，不继承词表 |
@@ -40,17 +40,17 @@
 ### 1.2 特殊 Token
 
 | ID | Token | 用途 | 模型配置 |
-|----|-------|------|----------|
-| 64000 | `<|endoftext|>` | 文本结束 | `tokenizer.pad_token` |
-| 64001 | `<|im_start|>` | 对话开始 | 特殊标记 |
-| 64002 | `<|im_end|>` | 对话结束 | `tokenizer.eos_token` |
-| 64003 | `<|think|>` | 推理开始 | 特殊标记 |
-| 64004 | `<|/think|>` | 推理结束 | 特殊标记 |
+| ---- | ------- | ---- | -------- |
+| 32000 | `<\|endoftext\|>` | 文本结束 | `tokenizer.pad_token` |
+| 32001 | `<\|im_start\|>` | 对话开始 | 特殊标记 |
+| 32002 | `<\|im_end\|>` | 对话结束 | `tokenizer.eos_token` |
+| 32003 | `<\|think\|>` | 推理开始 | 特殊标记 |
+| 32004 | `<\|/think\|>` | 推理结束 | 特殊标记 |
 
 **模型配置**:
 - `bos_token` = `None`
-- `eos_token` = `<|im_end|>` (64002)
-- `pad_token` = `<|endoftext|>` (64000)
+- `eos_token` = `<|im_end|>` (32002)
+- `pad_token` = `<|endoftext|>` (32000)
 - `unk_token` = `None`
 
 **对话格式示例**:
@@ -68,14 +68,14 @@
 
 ### 2.1 数据配比
 
-总计 **40M** 样本，多领域混合：
+总计 **800K** 样本，多领域混合：
 
 | 数据集 | 样本数 | 占比 | 明细 |
 |--------|--------|------|------|
-| **FineWeb-EN** | 12.0M | 30% | 4.0分: 5.4M, 3.5分: 2.4M, 3.0分: 2.4M, 2.5分: 1.8M |
-| **FineWeb-ZH** | 10.0M | 25% | 4.0分: 4.5M, 3.5分: 2.0M, 3.0分: 2.0M, 2.5分: 1.5M |
-| **GitHub Code** | 12.0M | 30% | ≥2 stars: 10M, <2 stars: 2M |
-| **Nemotron-CC-Math** | 6.0M | 15% | 4plus: 3.0M, 4plus_MIND: 1.92M, 3: 1.08M |
+| **FineWeb-EN** | 192K | 24% | 4.0分: 96K (50%), 3.5分: 48K (25%), 3.0分: 28.8K (15%), 2.5分: 19.2K (10%) |
+| **FineWeb-ZH** | 224K | 28% | 4.0分: 112K (50%), 3.5分: 56K (25%), 3.0分: 33.6K (15%), 2.5分: 22.4K (10%) |
+| **GitHub Code** | 256K | 32% | ≥2 stars: 217.6K (85%), <2 stars: 38.4K (15%) |
+| **Nemotron-CC-Math** | 128K | 16% | 4plus: 76.8K (60%), 4plus_MIND: 32K (25%), 3: 19.2K (15%) |
 
 > 数据采样配置详见 [config/tokenizer_data.yaml](#tokenizer_data_yaml)。
 
@@ -111,10 +111,11 @@ data/datasets/nanomind_tokenizer/
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| `id` | string | 文档唯一标识（格式：`{完整路径}#{index}`） |
 | `text` | string | 文本内容 |
 | `source_dataset` | string | 数据集名称（如 `fineweb_edu_en`） |
 | `source_bucket` | string | 桶名称（如 `4.0`、`above-2-stars`） |
-
+| `language` | string | 编程语言（仅 GitHub Code 数据集有该字段） |
 ---
 
 ## 3. 训练流程
@@ -123,7 +124,7 @@ data/datasets/nanomind_tokenizer/
 |------|------|------|------|
 | 1. 准备模板 | `prepare_template.py` | Qwen3-Next | `output/qwen3_next_tokenizer/` |
 | 2. 数据采样 | `prepare_tokenizer_data.py` | 源数据目录 | `data/datasets/nanomind_tokenizer/` |
-| 3. Tokenizer训练 | `train_tokenizer.py` | 采样后数据 | `output/tokenizer_64k/` |
+| 3. Tokenizer训练 | `train_tokenizer.py` | 采样后数据 | `output/tokenizer_32k/` |
 
 ### 3.1 准备模板（一次性）
 
@@ -139,7 +140,7 @@ base.save_pretrained("output/qwen3_next_tokenizer")
 
 ### 3.2 数据采样
 
-**目标**: 从各数据源按配置比例采样 40M 样本。
+**目标**: 从各数据源按配置比例采样 800K 样本。
 
 ```bash
 # 使用默认配置（针对 32 核/250GB/400MB/s 优化）
@@ -169,39 +170,36 @@ datasets:
   fineweb_en:
     name: "fineweb_edu_en"
     source: "data/datasets/fineweb/en"
-    samples: 12000000
+    samples: 192000
     buckets:
-      4.0: {count: 5400000}
-      3.5: {count: 2400000}
-      3.0: {count: 2400000}
-      2.5: {count: 1800000}
-
+      4.0: {count: 96000}  # 50%
+      3.5: {count: 48000}   # 25%
+      3.0: {count: 28800}   # 15%
+      2.5: {count: 19200}   # 10%
   fineweb_zh:
     name: "fineweb_edu_zh"
     source: "data/datasets/fineweb/zh"
-    samples: 10000000
+    samples: 224000
     buckets:
-      4.0: {count: 4500000}
-      3.5: {count: 2000000}
-      3.0: {count: 2000000}
-      2.5: {count: 1500000}
-
+      4.0: {count: 112000}  # 50%
+      3.5: {count: 56000}   # 25%
+      3.0: {count: 33600}   # 15%
+      2.5: {count: 22400}   # 10%
   github_code:
     name: "github_code"
     source: "data/datasets/nick007x/github-code-2025"
-    samples: 12000000
+    samples: 256000
     stars_filter:
-      above-2-stars: {count: 10000000}
-      below-2-stars: {count: 2000000}
-
+      above-2-stars: {count: 217600}  # 85%
+      below-2-stars: {count: 38400}   # 15%
   nemotron_math:
     name: "nemotron_cc_math"
     source: "data/datasets/nvidia/Nemotron-CC-Math-v1"
-    samples: 6000000
+    samples: 128000
     buckets:
-      4plus: {count: 3000000}
-      4plus_MIND: {count: 1920000}
-      3: {count: 1080000}
+      4plus: {count: 76800}   # 60%
+      4plus_MIND: {count: 32000}   # 25%
+      3: {count: 19200}   # 15%
 
 random_seed: 42
 output_format: "parquet"
@@ -262,11 +260,35 @@ output_dir: "data/datasets/nanomind_tokenizer"
 ```python
 pipeline = [
     ParquetReader(...),      # 流式读取 Parquet 文件
-    IndexFilter(indices),    # 过滤未选中的文档
+    IndexFilter(indices),    # 过滤未选中的文档（采样模式下）
+    LanguageTagger(...),     # 标记编程语言（仅 GitHub Code）
     SourceTagger(...),       # 添加来源标签
     TokenizerDataWriter(...),# 写入输出文件
 ]
 ```
+
+**GitHub Code 语言过滤**:
+
+针对 GitHub Code 数据集，实现了基于文件扩展名的语言过滤和标记：
+
+| 语言 | 扩展名 |
+|------|--------|
+| C | `.c`, `.h` |
+| C++ | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx` |
+| Python | `.py`, `.pyw`, `.pyi` |
+| Rust | `.rs` |
+| HTML | `.html`, `.htm`, `.xhtml` |
+| CSS | `.css`, `.scss`, `.sass`, `.less` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` |
+| Markdown | `.md`, `.markdown`, `.mkd` |
+| JSON | `.json`, `.jsonc`, `.jsonl` |
+| XML | `.xml`, `.xsl`, `.xslt`, `.svg`, `.wsdl` |
+| TOML | `.toml` |
+
+- 只保留上述扩展名的文件，其他文件被过滤
+- 通过 `LANGUAGE_EXTENSIONS` 常量定义扩展名到语言名称的映射
+- 通过 `ALLOWED_LANGUAGES` 集合（从 `LANGUAGE_EXTENSIONS` 派生）控制允许的扩展名
 
 ### 3.3 Tokenizer 训练
 
@@ -274,15 +296,15 @@ pipeline = [
 python scripts/train_tokenizer.py \
     --data-dir data/datasets/nanomind_tokenizer \
     --template-dir output/qwen3_next_tokenizer \
-    --output-dir output/tokenizer_64k \
-    --vocab-size 64005 \
+    --output-dir output/tokenizer_32k \
+    --vocab-size 32005 \
     --validate
 ```
 
 **训练步骤**:
 1. 从模板加载 pretokenizer/normalizer/decoder 配置
-2. 空白初始化，在采样数据上学习 64000 个 BPE 合并规则
-3. 添加 5 个特殊 token（ID 64000-64004）
+2. 空白初始化，在采样数据上学习 32000 个 BPE 合并规则
+3. 添加 5 个特殊 token（ID 32000-32004）
 4. 配置 eos/pad/bos/unk 映射
 
 #### 训练内存优化
@@ -295,7 +317,7 @@ python scripts/train_tokenizer.py \
 
 **训练时间估算**（参考值）:
 - 40M 样本 × 平均 500 tokens ≈ 20B tokens
-- 64K BPE 训练：预计 4-8 小时（32 核 CPU）
+- 32K BPE 训练：预计 4-8 小时（32 核 CPU）
 
 ---
 
@@ -304,8 +326,8 @@ python scripts/train_tokenizer.py \
 ### 4.1 自动验证
 
 训练时添加 `--validate` 参数，检查：
-- 词表大小 = 64005
-- 特殊 token ID 正确（64000-64004）
+- 词表大小 = 32005
+- 特殊 token ID 正确（32000-32004）
 - 编解码一致性
 
 ### 4.2 手动验证
@@ -313,10 +335,10 @@ python scripts/train_tokenizer.py \
 ```python
 from transformers import AutoTokenizer
 
-tokenizer = AutoTokenizer.from_pretrained("output/tokenizer_64k")
+tokenizer = AutoTokenizer.from_pretrained("output/tokenizer_32k")
 
 # 验证词表大小
-assert tokenizer.vocab_size == 64005
+assert tokenizer.vocab_size == 32005
 
 # 验证特殊 token
 print(tokenizer.special_tokens_map)
@@ -331,7 +353,7 @@ assert text == decoded
 ### 4.3 输出文件
 
 ```
-output/tokenizer_64k/
+output/tokenizer_32k/
 ├── tokenizer.json              # 词表与合并规则
 ├── tokenizer_config.json       # Tokenizer配置
 ├── special_tokens_map.json     # 特殊token映射
@@ -359,16 +381,18 @@ pyarrow>=15.0.0
 
 **prepare_tokenizer_data.py 核心模块**:
 
-| 模块/类 | 功能 |
-|---------|------|
+| 模块/类/常量 | 功能 |
+|--------------|------|
+| `LANGUAGE_EXTENSIONS` | 扩展名到语言名称的映射字典（38个扩展名） |
+| `ALLOWED_LANGUAGES` | 允许的扩展名集合（从 `LANGUAGE_EXTENSIONS` 派生） |
 | `SamplingConfig` | 数据集采样配置数据类 |
 | `TokenizerDataConfig` | 全局配置数据类 |
 | `precompute_sampling_indices()` | 第一遍：预计算采样索引 |
 | `IndexFilter` | Pipeline 步骤：过滤未选中文档 |
+| `LanguageTagger` | Pipeline 步骤：标记编程语言（仅 GitHub Code） |
 | `SourceTagger` | Pipeline 步骤：添加来源标签 |
 | `TokenizerDataWriter` | Pipeline 步骤：流式写入 Parquet |
 | `process_bucket_streaming()` | 处理单个桶（自动选择全量/采样模式） |
-
 ---
 
 ## 6. 附录
@@ -385,4 +409,4 @@ pyarrow>=15.0.0
 
 ---
 
-*最后更新: 2026-02-16*
+*最后更新: 2026-02-22*

@@ -10,7 +10,10 @@ import yaml
 from datatrove.data import Document
 
 from scripts.prepare_tokenizer_data import (
+    ALLOWED_LANGUAGES,
     IndexFilter,
+    LANGUAGE_EXTENSIONS,
+    LanguageTagger,
     SamplingConfig,
     SamplingInfo,
     SourceTagger,
@@ -46,6 +49,22 @@ def create_test_documents(file_path: Path, num_docs: int) -> list[Document]:
         )
         for i in range(num_docs)
     ]
+
+def create_source_document(
+    text: str = "test",
+    doc_id: str = "doc_1",
+    dataset_name: str = "test_dataset",
+    bucket_name: str = "test_bucket",
+) -> Document:
+    """辅助函数：创建带有 source_dataset 和 source_bucket 的测试 Document。"""
+    return Document(
+        text=text,
+        id=doc_id,
+        metadata={
+            "source_dataset": dataset_name,
+            "source_bucket": bucket_name,
+        },
+    )
 
 
 @pytest.fixture
@@ -466,10 +485,11 @@ class TestTokenizerDataWriter:
             max_rows_per_file=100,
             buffer_size=10,
         )
-        doc = Document(
+        doc = create_source_document(
             text="hello world",
-            id="doc_1",
-            metadata={"source_dataset": "fineweb_edu_en", "source_bucket": "4.0"},
+            doc_id="doc_1",
+            dataset_name="fineweb_edu_en",
+            bucket_name="4.0",
         )
         writer.run(iter([doc]), rank=0, world_size=1)
         files = list(output_dir.glob("*.parquet"))
@@ -580,3 +600,161 @@ class TestFindBucketDir:
 
         result = find_bucket_dir([file_path], "4.0")
         assert result == bucket_dir
+
+
+
+class TestLanguageTagger:
+    def test_tags_python_files(self):
+        doc = Document(
+            text="print('hello')",
+            id="doc_1",
+            metadata={"file_path": "/path/to/script.py"},
+        )
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        result = list(tagger.run(iter([doc]), rank=0, world_size=1))
+        assert len(result) == 1
+        assert result[0].metadata["language"] == "python"
+
+    def test_tags_cpp_files(self):
+        doc = Document(
+            text="int main() {}",
+            id="doc_1",
+            metadata={"file_path": "/path/to/main.cpp"},
+        )
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        result = list(tagger.run(iter([doc]), rank=0, world_size=1))
+        assert result[0].metadata["language"] == "cpp"
+
+    def test_filters_unsupported_extensions(self):
+        doc = Document(
+            text="some content",
+            id="doc_1",
+            metadata={"file_path": "/path/to/file.unknown"},
+        )
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        result = list(tagger.run(iter([doc]), rank=0, world_size=1))
+        assert len(result) == 0
+
+    def test_filters_empty_file_path(self):
+        doc = Document(
+            text="some content",
+            id="doc_1",
+            metadata={"file_path": ""},
+        )
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        result = list(tagger.run(iter([doc]), rank=0, world_size=1))
+        assert len(result) == 0
+
+    def test_filters_no_extension(self):
+        doc = Document(
+            text="some content",
+            id="doc_1",
+            metadata={"file_path": "/path/to/Makefile"},
+        )
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        result = list(tagger.run(iter([doc]), rank=0, world_size=1))
+        assert len(result) == 0
+
+    def test_tags_javascript_and_typescript(self):
+        docs = [
+            Document(text="js", id="1", metadata={"file_path": "app.js"}),
+            Document(text="ts", id="2", metadata={"file_path": "app.ts"}),
+            Document(text="jsx", id="3", metadata={"file_path": "App.jsx"}),
+            Document(text="tsx", id="4", metadata={"file_path": "App.tsx"}),
+        ]
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        result = list(tagger.run(iter(docs), rank=0, world_size=1))
+        assert len(result) == 4
+        assert result[0].metadata["language"] == "javascript"
+        assert result[1].metadata["language"] == "typescript"
+        assert result[2].metadata["language"] == "javascript"
+        assert result[3].metadata["language"] == "typescript"
+
+    def test_get_file_extension_static_method(self):
+        assert LanguageTagger._get_file_extension("test.py") == ".py"
+        assert LanguageTagger._get_file_extension("/path/to/file.cpp") == ".cpp"
+        assert LanguageTagger._get_file_extension("no_extension") is None
+        assert LanguageTagger._get_file_extension("") is None
+
+    def test_language_extensions_constant(self):
+        assert ".py" in LANGUAGE_EXTENSIONS
+        assert ".cpp" in LANGUAGE_EXTENSIONS
+        assert ".js" in LANGUAGE_EXTENSIONS
+        assert ".ts" in LANGUAGE_EXTENSIONS
+        assert LANGUAGE_EXTENSIONS[".py"] == "python"
+        assert LANGUAGE_EXTENSIONS[".cpp"] == "cpp"
+
+    def test_allowed_languages_constant(self):
+        assert ".py" in ALLOWED_LANGUAGES
+        assert ".cpp" in ALLOWED_LANGUAGES
+        assert ".unknown" not in ALLOWED_LANGUAGES
+
+
+    def test_includes_language_column_when_enabled(self, tmp_path):
+        output_dir = tmp_path / "output"
+        writer = TokenizerDataWriter(
+            output_dir=str(output_dir),
+            dataset_name="github_code",
+            bucket_name="test_bucket",
+            max_rows_per_file=100,
+            buffer_size=10,
+            include_language=True,
+        )
+        doc = Document(
+            text="def hello(): pass",
+            id="doc_1",
+            metadata={
+                "source_dataset": "github_code",
+                "source_bucket": "test_bucket",
+                "language": "python",
+            },
+        )
+        writer.run(iter([doc]), rank=0, world_size=1)
+        files = list(output_dir.glob("*.parquet"))
+        table = pq.read_table(files[0])
+        assert "language" in table.column_names
+        assert table["language"][0].as_py() == "python"
+
+    def test_excludes_language_column_when_disabled(self, tmp_path):
+        output_dir = tmp_path / "output"
+        writer = TokenizerDataWriter(
+            output_dir=str(output_dir),
+            dataset_name="fineweb_edu_en",
+            bucket_name="4.0",
+            max_rows_per_file=100,
+            buffer_size=10,
+            include_language=False,
+        )
+        doc = create_source_document(
+            text="hello world",
+            doc_id="doc_1",
+            dataset_name="fineweb_edu_en",
+            bucket_name="4.0",
+        )
+        writer.run(iter([doc]), rank=0, world_size=1)
+        files = list(output_dir.glob("*.parquet"))
+        table = pq.read_table(files[0])
+        assert "language" not in table.column_names
+
+    def test_default_language_is_unknown(self, tmp_path):
+        output_dir = tmp_path / "output"
+        writer = TokenizerDataWriter(
+            output_dir=str(output_dir),
+            dataset_name="github_code",
+            bucket_name="test_bucket",
+            max_rows_per_file=100,
+            buffer_size=10,
+            include_language=True,
+        )
+        doc = Document(
+            text="some text",
+            id="doc_1",
+            metadata={
+                "source_dataset": "github_code",
+                "source_bucket": "test_bucket",
+            },
+        )
+        writer.run(iter([doc]), rank=0, world_size=1)
+        files = list(output_dir.glob("*.parquet"))
+        table = pq.read_table(files[0])
+        assert table["language"][0].as_py() == "unknown"
