@@ -94,6 +94,11 @@ def parquet_text_iterator(
     logger.info(f"总计读取 {total_docs:,} 个文档")
 
 
+# SentencePiece 保留字符 (U+2585) - 包含此字符的行会被跳过
+# 参考: https://github.com/google/sentencepiece/issues/1052
+RESERVED_CHAR = "\u2585"  # ▅
+
+
 def export_to_text_streaming(
     data_dir: Path,
     output_file: Path,
@@ -106,6 +111,7 @@ def export_to_text_streaming(
     1. 保留原始文本中的所有换行符（不替换为空格）
     2. 使用空行（\n\n）作为文档分隔符
     3. 流式处理，内存占用低
+    4. 移除 SentencePiece 保留字符 (U+2585) 以避免训练时跳过
 
     Args:
         data_dir: 输入数据目录
@@ -123,6 +129,7 @@ def export_to_text_streaming(
 
     total_docs = 0
     empty_docs = 0
+    skipped_reserved_docs = 0
 
     with open(output_file, "w", encoding="utf-8") as f:
         for doc in parquet_text_iterator(data_dir, columns=["text"]):
@@ -134,6 +141,16 @@ def export_to_text_streaming(
             if not text:
                 empty_docs += 1
                 continue
+
+            # 移除 SentencePiece 保留字符 (U+2585)，避免训练时跳过整行
+            # 参考: https://github.com/google/sentencepiece/issues/1052
+            if RESERVED_CHAR in text:
+                text = text.replace(RESERVED_CHAR, "")
+                skipped_reserved_docs += 1
+                # 如果移除后文本为空，则跳过
+                if not text:
+                    empty_docs += 1
+                    continue
 
             # 写入文档内容（保留所有换行符）
             f.write(text)
@@ -150,6 +167,7 @@ def export_to_text_streaming(
     logger.info("导出完成:")
     logger.info(f"  总文档数: {total_docs:,}")
     logger.info(f"  空文档数: {empty_docs:,}")
+    logger.info(f"  移除保留字符(U+2585)的文档数: {skipped_reserved_docs:,}")
     logger.info(f"  输出文件: {output_file}")
     logger.info(f"  文件大小: {output_file.stat().st_size / (1024**3):.2f} GB")
 
@@ -216,7 +234,7 @@ def train_sentencepiece(
             character_coverage=1.0,  # 全覆盖所有字符（与 qwen3 tokenizer 一致）
             num_threads=num_threads,
             # 句子长度限制
-            max_sentence_length=0,  # 0 = 不限制
+            max_sentence_length=65536,  # 64K，处理超长文档
             max_sentencepiece_length=64,
             # 分割设置
             split_by_unicode_script=False,
@@ -229,6 +247,12 @@ def train_sentencepiece(
             shrinking_factor=0.75,  # 每次EM迭代保留75%，平衡收敛速度与质量
             # 添加用户定义的特殊token（确保不可分割）
             user_defined_symbols=",".join(special_tokens),
+            # 禁用默认特殊token，释放 <s>, </s>, <unk>, <pad> 供正常训练使用
+            # 项目使用自定义特殊token：<|im_end|> 作为 eos，<|endoftext|> 作为 pad
+            bos_id=-1,  # 禁用 BOS
+            eos_id=-1,  # 禁用默认 EOS（使用 user_defined_symbols 中的 <|im_end|>）
+            # 注意：<unk> 必须保留（默认 id=0），SentencePiece 需要它处理未知字符
+            pad_id=-1,  # 禁用默认 PAD（使用 user_defined_symbols 中的 <|endoftext|>）
         )
 
         logger.info("训练完成！")
