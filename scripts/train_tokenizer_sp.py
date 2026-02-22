@@ -223,13 +223,9 @@ def train_sentencepiece(
         "--split_by_whitespace=true",
         # 大语料处理
         "--train_extremely_large_corpus=true",
-        # 采样设置（内部使用 reservoir sampling）
-        "--input_sentence_size=0",  # 0 = 不限制，使用全部语料
-        "--shuffle_input_sentence=true",
-        # 控制词表大小
-        "--seed_sentencepiece_size=500000",
-        "--mining_sentence_size=5000000",
-        "--shrinking_factor=0.75",
+        # 控制词表大小（40M语料推荐配置）
+        "--seed_sentencepiece_size=1000000",  # 默认值，约为32k词表的30倍，确保充分覆盖
+        "--shrinking_factor=0.75",  # 每次EM迭代保留75%，平衡收敛速度与质量
         # 添加用户定义的特殊token（确保不可分割）
         f"--user_defined_symbols={','.join(special_tokens)}",
     ]
