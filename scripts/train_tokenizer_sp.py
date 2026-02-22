@@ -185,17 +185,32 @@ def train_sentencepiece(
 
     model_path = output_dir / f"{model_prefix}.model"
 
+    # 特殊 token 列表 - 确保它们在训练时就被当作不可分割的单元
+    special_tokens = [
+        "<|endoftext|>",
+        "<|im_start|>",
+        "<|im_end|>",
+        "<|think|>",
+        "<|/think|>",
+    ]
+    num_special = len(special_tokens)
+
+    # 基础 BPE 词表大小 = vocab_size（用户指定）
+    # 最终总词表大小 = vocab_size + num_special（基础 + 特殊token）
+    bpe_vocab_size = vocab_size
+    total_vocab_size = vocab_size + num_special
+
     logger.info("开始训练 SentencePiece 模型...")
     logger.info(f"输入文件: {input_file}")
-    logger.info(f"词表大小: {vocab_size}")
+    logger.info(f"基础 BPE 词表: {vocab_size}, 特殊 token: {num_special}, 总计: {total_vocab_size}")
+    logger.info(f"特殊 tokens: {special_tokens}")
     logger.info(f"输出目录: {output_dir}")
-
     # 构建 spm_train 命令
     cmd = [
         "spm_train",
         f"--input={input_file}",
         f"--model_prefix={output_dir / model_prefix}",
-        f"--vocab_size={vocab_size}",
+        f"--vocab_size={bpe_vocab_size}",
         "--model_type=bpe",
         "--character_coverage=1.0",  # 全覆盖所有字符（与 qwen3 tokenizer 一致）
         f"--num_threads={num_threads}",
@@ -215,6 +230,8 @@ def train_sentencepiece(
         "--seed_sentencepiece_size=500000",
         "--mining_sentence_size=5000000",
         "--shrinking_factor=0.75",
+        # 添加用户定义的特殊token（确保不可分割）
+        f"--user_defined_symbols={','.join(special_tokens)}",
     ]
 
     logger.info(f"训练命令: {' '.join(cmd)}")
@@ -356,7 +373,7 @@ if __name__ == "__main__":
         "--vocab-size",
         type=int,
         default=32000,
-        help="词表大小（默认: 32000）",
+        help="基础 BPE 词表大小（默认: 32000，不包括特殊 token）",
     )
     parser.add_argument(
         "--num-threads",

@@ -77,6 +77,9 @@ TEST_CASES: list[TestCase] = [
     # 特殊 token
     TestCase("special_im", "<|im_start|>user\n你好<|im_end|>", "对话格式"),
     TestCase("special_eot", "<|endoftext|>", "结束符"),
+    TestCase("special_think", "<|think|>推理内容<|/think|>", "推理格式"),
+    TestCase("special_think_only", "<|think|>", "推理开始标记"),
+    TestCase("special_think_end_only", "<|/think|>", "推理结束标记"),
     # 非训练语言回退测试（验证 byte-level 回退能力）
     TestCase("japanese", "こんにちは", "非训练语言-日语（回退测试）"),
     TestCase("korean", "안녕하세요", "非训练语言-韩语（回退测试）"),

@@ -40,9 +40,9 @@ __all__ = [
     "setup_pre_tokenizer",
     "setup_decoder",
     "setup_post_processor",
-    "add_special_tokens",
     "create_tokenizer_config",
     "create_special_tokens_map",
+    "setup_special_tokens",
     "convert",
     "test_tokenizer",
 ]
@@ -52,17 +52,8 @@ QWEN3_SPECIAL_TOKENS: tuple[str, ...] = (
     "<|endoftext|>",
     "<|im_start|>",
     "<|im_end|>",
-    "<|object_ref_start|>",
-    "<|object_ref_end|>",
-    "<|box_start|>",
-    "<|box_end|>",
-    "<|quad_start|>",
-    "<|quad_end|>",
-    "<|vision_start|>",
-    "<|vision_end|>",
-    "<|vision_pad|>",
-    "<|image_pad|>",
-    "<|video_pad|>",
+    "<|think|>",
+    "<|/think|>",
 )
 
 
@@ -108,14 +99,20 @@ def convert_sp_to_hf_bpe(
     logger.info(f"加载 SentencePiece 模型: {sp_model_path}")
     sp = _load_sp_model(sp_model_path)
 
-    # 提取词表（只取前 vocab_size 个）
+    # 提取词表（基础词表 + 特殊token）
+    # 注意：SPM训练时，--vocab_size是BPE基础词表，特殊token通过--user_defined_symbols额外添加
+    num_special = len(QWEN3_SPECIAL_TOKENS)
+    total_vocab_size = vocab_size + num_special
+
     vocab: dict[str, int] = {}
     sp_vocab_size = sp.vocab_size()
-    for i in range(min(vocab_size, sp_vocab_size)):
+    for i in range(min(total_vocab_size, sp_vocab_size)):
         token = sp.id_to_piece(i)  # type: ignore[attr-defined]
         vocab[token] = i
 
-    logger.info(f"基础词表大小: {len(vocab)}")
+    logger.info(f"基础 BPE 词表: {vocab_size}")
+    logger.info(f"特殊 token: {num_special} ({QWEN3_SPECIAL_TOKENS})")
+    logger.info(f"最终总词表大小: {len(vocab)}")
 
     # 创建 BPE 模型（没有 unk_token，因为 qwen3 没有）
     model = BPE(
@@ -178,20 +175,6 @@ def setup_post_processor(tokenizer: Tokenizer) -> None:
     logger.info("已设置 post-processor")
 
 
-def add_special_tokens(tokenizer: Tokenizer) -> None:
-    """
-    添加特殊 token
-
-    Args:
-        tokenizer: Tokenizer 实例
-    """
-    for token in QWEN3_SPECIAL_TOKENS:
-        tokenizer.add_tokens([token])
-        logger.debug(f"添加特殊 token: {token}")
-
-    logger.info(f"添加了 {len(QWEN3_SPECIAL_TOKENS)} 个特殊 token")
-
-
 def create_tokenizer_config(
     vocab_size: int,
     extra_special_tokens: tuple[str, ...],
@@ -215,11 +198,36 @@ def create_tokenizer_config(
 
 
 def create_special_tokens_map() -> dict[str, str | None]:
-    """创建 special_tokens_map.json"""
+    """创建 special_tokens_map.json
+    
+    包含所有核心特殊token的映射。
+    """
     return {
         "eos_token": "<|im_end|>",
         "pad_token": "<|endoftext|>",
+        "unk_token": None,
+        "bos_token": None,
     }
+
+
+def setup_special_tokens(tokenizer: Tokenizer) -> None:
+    """
+    在Tokenizer对象中注册所有特殊token
+    
+    确保这些核心token被正确识别为不可分割的特殊token：
+    - <|endoftext|>: pad token
+    - <|im_start|>: 对话开始标记
+    - <|im_end|>: eos token，对话结束标记
+    - <|think|>: 推理开始标记
+    - <|/think|>: 推理结束标记
+    
+    这是关键步骤：仅仅在词表中有这些token不够，
+    必须显式标记为special token才能确保正确处理。
+    """
+    # 使用 add_special_tokens 确保这些token被标记为特殊token
+    # 这样它们在tokenization时不会被拆分，且在tokenizer.json中有正确标记
+    tokenizer.add_special_tokens(list(QWEN3_SPECIAL_TOKENS))
+    logger.info(f"已注册 {len(QWEN3_SPECIAL_TOKENS)} 个特殊token: {QWEN3_SPECIAL_TOKENS}")
 
 
 def convert(
@@ -247,29 +255,29 @@ def convert(
     logger.info("=" * 60)
 
     # 1. 加载 qwen3 配置（用于验证和日志记录）
-    logger.info("\n[1/6] 加载 qwen3 配置...")
+    logger.info("\n[1/5] 加载 qwen3 配置...")
     qwen3_config = load_qwen3_config(qwen3_dir)
     if qwen3_config is None:
         logger.warning("未找到 qwen3 配置文件，将使用默认配置")
 
     # 2. 转换模型
-    logger.info("\n[2/6] 转换 SentencePiece 模型...")
+    logger.info("\n[2/5] 转换 SentencePiece 模型...")
     tokenizer = convert_sp_to_hf_bpe(sp_model_path, vocab_size)
+    
+    # 注册特殊token（关键步骤：必须在保存前调用）
+    logger.info("\n[*] 注册特殊token...")
+    setup_special_tokens(tokenizer)
 
     # 3. 设置 pre-tokenizer
-    logger.info("\n[3/6] 设置 pre-tokenizer...")
+    logger.info("\n[3/5] 设置 pre-tokenizer...")
     setup_pre_tokenizer(tokenizer)
 
     # 4. 设置 decoder
-    logger.info("\n[4/6] 设置 decoder...")
+    logger.info("\n[4/5] 设置 decoder...")
     setup_decoder(tokenizer)
 
-    # 5. 添加特殊 token
-    logger.info("\n[5/6] 添加特殊 token...")
-    add_special_tokens(tokenizer)
-
-    # 6. 设置 post-processor
-    logger.info("\n[6/6] 设置 post-processor...")
+    # 5. 设置 post-processor
+    logger.info("\n[5/5] 设置 post-processor...")
     setup_post_processor(tokenizer)
 
     # 保存 tokenizer
@@ -278,8 +286,10 @@ def convert(
     logger.info(f"已保存 tokenizer: {tokenizer_file}")
 
     # 创建 tokenizer_config.json
+    # 注意：vocab_size 是基础 BPE 词表，最终总大小 = 基础 + 特殊 token
+    total_vocab_size = vocab_size + len(QWEN3_SPECIAL_TOKENS)
     config = create_tokenizer_config(
-        vocab_size=vocab_size + len(QWEN3_SPECIAL_TOKENS),
+        vocab_size=total_vocab_size,
         extra_special_tokens=QWEN3_SPECIAL_TOKENS,
     )
     config_file = output_dir / "tokenizer_config.json"
@@ -393,7 +403,7 @@ if __name__ == "__main__":
         "--vocab-size",
         type=int,
         default=32000,
-        help="基础词表大小（默认: 32000，不包括特殊 token）",
+        help="基础 BPE 词表大小（默认: 32000，不包括特殊 token）",
     )
     parser.add_argument(
         "--test",
