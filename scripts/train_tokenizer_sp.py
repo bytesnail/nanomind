@@ -378,8 +378,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num-threads",
         type=int,
-        default=16,
-        help="训练线程数（默认: 16）",
+        default=32,
+        help="训练线程数（默认: 32）",
     )
     parser.add_argument(
         "--skip-export",
