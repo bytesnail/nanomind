@@ -19,11 +19,11 @@ from __future__ import annotations
 import argparse
 import gc
 import logging
-import subprocess
 from pathlib import Path
 from typing import Iterator
 
 import pyarrow.parquet as pq
+import sentencepiece as spm
 from tqdm import tqdm
 
 logging.basicConfig(
@@ -164,7 +164,7 @@ def train_sentencepiece(
     num_threads: int = 32,
 ) -> Path:
     """
-    使用 spm_train 训练 SentencePiece 模型
+    使用 SentencePiece Python API 训练模型
 
     配置说明：
     - 使用 BPE 算法
@@ -205,43 +205,31 @@ def train_sentencepiece(
     logger.info(f"基础 BPE 词表: {vocab_size}, 特殊 token: {num_special}, 总计: {total_vocab_size}")
     logger.info(f"特殊 tokens: {special_tokens}")
     logger.info(f"输出目录: {output_dir}")
-    # 构建 spm_train 命令
-    cmd = [
-        "spm_train",
-        f"--input={input_file}",
-        f"--model_prefix={output_dir / model_prefix}",
-        f"--vocab_size={bpe_vocab_size}",
-        "--model_type=bpe",
-        "--character_coverage=1.0",  # 全覆盖所有字符（与 qwen3 tokenizer 一致）
-        f"--num_threads={num_threads}",
-        # 句子长度限制
-        "--max_sentence_length=0",  # 0 = 不限制
-        "--max_sentencepiece_length=64",
-        # 分割设置
-        "--split_by_unicode_script=false",
-        "--split_by_number=false",
-        "--split_by_whitespace=true",
-        # 大语料处理
-        "--train_extremely_large_corpus=true",
-        # 控制词表大小（40M语料推荐配置）
-        "--seed_sentencepiece_size=1000000",  # 默认值，约为32k词表的30倍，确保充分覆盖
-        "--shrinking_factor=0.75",  # 每次EM迭代保留75%，平衡收敛速度与质量
-        # 添加用户定义的特殊token（确保不可分割）
-        f"--user_defined_symbols={','.join(special_tokens)}",
-    ]
 
-    logger.info(f"训练命令: {' '.join(cmd)}")
-
+    # 使用 SentencePiece Python API 训练
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
+        spm.SentencePieceTrainer.train(
+            input=str(input_file),
+            model_prefix=str(output_dir / model_prefix),
+            vocab_size=bpe_vocab_size,
+            model_type="bpe",
+            character_coverage=1.0,  # 全覆盖所有字符（与 qwen3 tokenizer 一致）
+            num_threads=num_threads,
+            # 句子长度限制
+            max_sentence_length=0,  # 0 = 不限制
+            max_sentencepiece_length=64,
+            # 分割设置
+            split_by_unicode_script=False,
+            split_by_number=False,
+            split_by_whitespace=True,
+            # 大语料处理
+            train_extremely_large_corpus=True,
+            # 控制词表大小（40M语料推荐配置）
+            seed_sentencepiece_size=1000000,  # 默认值，约为32k词表的30倍，确保充分覆盖
+            shrinking_factor=0.75,  # 每次EM迭代保留75%，平衡收敛速度与质量
+            # 添加用户定义的特殊token（确保不可分割）
+            user_defined_symbols=",".join(special_tokens),
         )
-
-        if result.stdout:
-            logger.info(result.stdout)
 
         logger.info("训练完成！")
         logger.info(f"模型文件: {model_path}")
@@ -256,15 +244,9 @@ def train_sentencepiece(
 
         return model_path
 
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         logger.error("训练失败！")
-        logger.error(f"stdout: {e.stdout}")
-        logger.error(f"stderr: {e.stderr}")
-        raise
-    except FileNotFoundError:
-        logger.error("未找到 spm_train 命令。请先安装 sentencepiece:")
-        logger.error("  pip install sentencepiece")
-        logger.error("或从源码编译安装：https://github.com/google/sentencepiece")
+        logger.error(f"错误: {e}")
         raise
 
 

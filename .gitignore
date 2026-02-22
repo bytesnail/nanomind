@@ -14,3 +14,5 @@ data/datasets
 
 # oh-my-opencode
 .sisyphus/
+
+train.txt
