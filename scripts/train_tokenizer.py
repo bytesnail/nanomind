@@ -259,9 +259,9 @@ def train_tokenizer(
         vocab_path = output_dir / "vocab.txt"
         save_vocab_text(tokenizer, vocab_path)
         if validate:
-            print()
+            logger.info("")
             validate_tokenizer(transformers_tokenizer, vocab_size)
-        print()
+        logger.info("")
         logger.info("=" * 60)
         logger.info("训练完成")
         logger.info("=" * 60)
