@@ -197,10 +197,10 @@ def train_sentencepiece(
         f"--model_prefix={output_dir / model_prefix}",
         f"--vocab_size={vocab_size}",
         "--model_type=bpe",
-        "--character_coverage=0.9995",
+        "--character_coverage=1.0",  # 全覆盖所有字符（与 qwen3 tokenizer 一致）
         f"--num_threads={num_threads}",
         # 句子长度限制
-        "--max_sentence_length=8192",
+        "--max_sentence_length=0",  # 0 = 不限制
         "--max_sentencepiece_length=64",
         # 分割设置
         "--split_by_unicode_script=false",
@@ -209,7 +209,7 @@ def train_sentencepiece(
         # 大语料处理
         "--train_extremely_large_corpus=true",
         # 采样设置（内部使用 reservoir sampling）
-        "--input_sentence_size=10000000",  # 如果输入 > 10M，会采样
+        "--input_sentence_size=0",  # 0 = 不限制，使用全部语料
         "--shuffle_input_sentence=true",
         # 控制词表大小
         "--seed_sentencepiece_size=200000",
@@ -315,21 +315,21 @@ if __name__ == "__main__":
         epilog="""
 示例:
     # 基础用法
-    python scripts/train_tokenizer_sp.py \\
-        --data-dir data/datasets/nanomind_tokenizer \\
+    python scripts/train_tokenizer_sp.py \
+        --data-dir data/datasets/nanomind_tokenizer \
         --output-dir output/tokenizer_32k_sp
     
     # 指定词表大小和线程数
-    python scripts/train_tokenizer_sp.py \\
-        --data-dir data/datasets/nanomind_tokenizer \\
-        --output-dir output/tokenizer_64k_sp \\
-        --vocab-size 64000 \\
+    python scripts/train_tokenizer_sp.py \
+        --data-dir data/datasets/nanomind_tokenizer \
+        --output-dir output/tokenizer_64k_sp \
+        --vocab-size 64000 \
         --num-threads 32
     
     # 跳过导出（使用已导出的文本文件）
-    python scripts/train_tokenizer_sp.py \\
-        --data-dir data/datasets/nanomind_tokenizer \\
-        --output-dir output/tokenizer_32k_sp \\
+    python scripts/train_tokenizer_sp.py \
+        --data-dir data/datasets/nanomind_tokenizer \
+        --output-dir output/tokenizer_32k_sp \
         --skip-export
         """,
     )
