@@ -5,7 +5,7 @@
 1. 两遍处理 - 第一遍计算采样索引，第二遍流式读取
 2. 内存 O(target_count * 16 bytes) - 只存储索引，不存储文档内容
 3. 正确利用 Datatrove 的并行架构 - 采样在 pipeline 外部完成
-4. 针对 32 核/250GB/400MB/s 配置优化默认参数
+4. 针对 16 核/250GB/400MB/s 配置优化默认参数
 
 v4 更新:
 - 输出文件名格式: {dataset_name}-{bucket_name}-{counter:05d}-rank-{rank:05d}.parquet
@@ -58,15 +58,13 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path("config/tokenizer_data.yaml")
 
-CPU_COUNT = os.cpu_count() or 32
+CPU_COUNT = os.cpu_count() or 16
 DEFAULT_WORKERS = min(16, CPU_COUNT)
 DEFAULT_TASKS = -1
 DEFAULT_MAX_ROWS = 500_000
 DEFAULT_BATCH_SIZE = 50_000
 COMPRESSION = "zstd"
 RANDOMIZE_START_DURATION = 5
-
-HASH_MODULUS = 2**64
 
 # GitHub Code 数据集：扩展名到语言名称的映射
 LANGUAGE_EXTENSIONS: dict[str, str] = {
@@ -262,15 +260,65 @@ def calculate_tasks(tasks: int, workers: int, item_count: int | None = None) -> 
     return max(1, workers)
 
 
+def get_file_extension(file_path: str) -> str | None:
+    """从文件路径获取扩展名."""
+    if not file_path:
+        return None
+    ext = Path(file_path).suffix.lower()
+    return ext if ext else None
+
+
+def _add_to_heap(
+    max_heap: list[tuple[int, int, int]],
+    doc_hash: int,
+    file_idx: int,
+    row_idx: int,
+    target_count: int,
+) -> None:
+    """将文档添加到最大堆中（维护最小的target_count个元素）."""
+    if len(max_heap) < target_count:
+        heapq.heappush(max_heap, (-doc_hash, file_idx, row_idx))
+    elif doc_hash < -max_heap[0][0]:
+        heapq.heapreplace(max_heap, (-doc_hash, file_idx, row_idx))
+
+
+def _build_result_from_heap(
+    max_heap: list[tuple[int, int, int]], file_list: list[Path]
+) -> dict[Path, set[int]]:
+    """从最大堆构建采样结果字典."""
+    result: dict[Path, set[int]] = {}
+    for _, file_idx, row_idx in max_heap:
+        result.setdefault(file_list[file_idx], set()).add(row_idx)
+    return result
+
+
 def precompute_sampling_indices(
     files: list[Path],
     bucket_name: str,
     seed: int,
     target_count: int,
+    allowed_extensions: set[str] | None = None,
 ) -> dict[Path, set[int]]:
+    """预计算采样索引。
+
+    Args:
+        files: Parquet文件列表
+        bucket_name: 桶名称
+        seed: 随机种子
+        target_count: 目标采样数量
+        allowed_extensions: 如果提供，只采样匹配这些扩展名的文档
+            注意：此时需要读取文件内容，根据 doc.metadata["file_path"] 过滤
+    """
     if not files:
         return {}
 
+    # 如果需要按扩展名过滤，则需要读取文件内容
+    if allowed_extensions:
+        return _precompute_with_content_filter(
+            files, bucket_name, seed, target_count, allowed_extensions
+        )
+
+    # 标准流程：只读取元数据
     max_heap: list[tuple[int, int, int]] = []
     file_list = list(files)
     total_scanned = 0
@@ -282,30 +330,88 @@ def precompute_sampling_indices(
     ):
         try:
             num_rows = pq.read_metadata(fp).num_rows
-            base_doc_id = f"{bucket_name}#{fp.name}#"
+            base_doc_id = f"{bucket_name}#{fp.resolve()}#"
 
             for row_idx in range(num_rows):
                 doc_id = f"{base_doc_id}{row_idx}"
                 doc_hash = compute_doc_hash(doc_id, seed)
                 total_scanned += 1
+                _add_to_heap(max_heap, doc_hash, file_idx, row_idx, target_count)
 
-                if len(max_heap) < target_count:
-                    heapq.heappush(max_heap, (-doc_hash, file_idx, row_idx))
-                elif doc_hash < -max_heap[0][0]:
-                    heapq.heapreplace(max_heap, (-doc_hash, file_idx, row_idx))
-
-        except Exception as e:
+        except (OSError, pa.ArrowInvalid) as e:
             logger.warning(f"处理文件失败 {fp}: {e}")
 
-    result: dict[Path, set[int]] = {}
-    for _, file_idx, row_idx in max_heap:
-        result.setdefault(file_list[file_idx], set()).add(row_idx)
-
+    result = _build_result_from_heap(max_heap, file_list)
     logger.info(
         f"  [{bucket_name}] 扫描 {total_scanned:,} 个文档，选中 {sum(len(v) for v in result.values()):,} 个"
     )
-
     return result
+
+
+def _precompute_with_content_filter(
+    files: list[Path],
+    bucket_name: str,
+    seed: int,
+    target_count: int,
+    allowed_extensions: set[str],
+) -> dict[Path, set[int]]:
+    """预计算采样索引，根据内容过滤（用于github_code）。"""
+    file_list = list(files)
+    max_heap: list[tuple[int, int, int]] = []
+    total_scanned = 0
+    total_filtered = 0
+
+    logger.info(
+        f"  [{bucket_name}] 预计算采样索引 (目标: {target_count:,}, "
+        f"语言过滤: {len(allowed_extensions)} 种扩展名)"
+    )
+
+    for file_idx, fp in enumerate(
+        tqdm(file_list, desc=f"哈希计算+过滤 {bucket_name}", leave=False)
+    ):
+        try:
+            table = pq.read_table(fp, columns=["file_path"])
+            file_paths = table["file_path"].to_pylist()
+            base_doc_id = f"{bucket_name}#{fp.resolve()}#"
+
+            for row_idx, file_path in enumerate(file_paths):
+                ext = get_file_extension(str(file_path))
+                if not ext or ext not in allowed_extensions:
+                    total_filtered += 1
+                    continue
+
+                doc_id = f"{base_doc_id}{row_idx}"
+                doc_hash = compute_doc_hash(doc_id, seed)
+                total_scanned += 1
+                _add_to_heap(max_heap, doc_hash, file_idx, row_idx, target_count)
+
+        except (OSError, pa.ArrowInvalid) as e:
+            logger.warning(f"处理文件失败 {fp}: {e}")
+
+    result = _build_result_from_heap(max_heap, file_list)
+    logger.info(
+        f"  [{bucket_name}] 扫描 {total_scanned:,} 个文档，"
+        f"过滤 {total_filtered:,} 个，选中 {sum(len(v) for v in result.values()):,} 个"
+    )
+    return result
+
+
+def _convert_to_row_set(value: set[int] | list[int] | str | Any) -> set[int]:
+    """将各种类型转换为行索引集合."""
+    if isinstance(value, set):
+        return value
+    if isinstance(value, list):
+        return set(value)
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, set):
+                return parsed
+            if hasattr(parsed, "__iter__"):
+                return set(parsed)
+        except (ValueError, SyntaxError):
+            pass
+    return set()
 
 
 class IndexFilter(PipelineStep):
@@ -316,28 +422,9 @@ class IndexFilter(PipelineStep):
         self, indices: dict[Path, set[int]] | dict[str, set[int] | list[int] | str]
     ):
         super().__init__()
-        self.indices: dict[str, set[int]] = {}
-        for k, v in indices.items():
-            if isinstance(v, set):
-                row_set = v
-            elif isinstance(v, list):
-                row_set = set(v)
-            elif isinstance(v, str):
-                try:
-                    row_set = ast.literal_eval(v)
-                    if not isinstance(row_set, set):
-                        row_set = (
-                            set(row_set) if hasattr(row_set, "__iter__") else set()
-                        )
-                except (ValueError, SyntaxError):
-                    row_set = set()
-            else:
-                row_set = set()
-            # 同时存储完整路径和文件名，以支持两种匹配方式
-            full_path = str(k)
-            file_name = k.name if isinstance(k, Path) else Path(str(k)).name
-            self.indices[full_path] = row_set
-            self.indices[file_name] = row_set
+        self.indices: dict[str, set[int]] = {
+            str(k): _convert_to_row_set(v) for k, v in indices.items()
+        }
 
     def run(
         self,
@@ -346,18 +433,11 @@ class IndexFilter(PipelineStep):
         world_size: int = 1,  # noqa: ARG002
     ) -> Iterator[Document]:
         for doc in data:
-            # 优先使用 parquet_path（github_code 数据集），否则使用 file_path
+            # 使用 parquet_path 匹配索引（adapter中已设置）
             parquet_path = doc.metadata.get("parquet_path", "")
-            file_path = doc.metadata.get("file_path", "")
             row_idx = doc.metadata.get("row_idx")
-            # 同时尝试 parquet_path 和 file_path 匹配
-            matched_path = None
-            if parquet_path in self.indices:
-                matched_path = parquet_path
-            elif file_path in self.indices:
-                matched_path = file_path
             
-            if matched_path and row_idx in self.indices[matched_path]:
+            if parquet_path in self.indices and row_idx in self.indices[parquet_path]:
                 self.stat_update("passed", value=1)
                 yield doc
             else:
@@ -375,14 +455,7 @@ class LanguageTagger(PipelineStep):
 
     def __init__(self, allowed_extensions: set[str]):
         super().__init__()
-        self.allowed_extensions = {ext.lower() for ext in allowed_extensions}
-
-    @staticmethod
-    def _get_file_extension(file_path: str) -> str | None:
-        if not file_path:
-            return None
-        ext = Path(file_path).suffix.lower()
-        return ext if ext else None
+        self.allowed_extensions = allowed_extensions
 
     def run(
         self,
@@ -392,7 +465,7 @@ class LanguageTagger(PipelineStep):
     ) -> Iterator[Document]:
         for doc in data:
             original_file_path = doc.metadata.get("file_path", "")
-            ext = self._get_file_extension(original_file_path)
+            ext = get_file_extension(original_file_path)
 
             if ext and ext in self.allowed_extensions:
                 doc.metadata["language"] = LANGUAGE_EXTENSIONS.get(ext, "unknown")
@@ -532,26 +605,25 @@ def get_parquet_files(source_dir: Path, bucket_name: str) -> list[Path]:
     return files
 
 
-def count_total_rows_fast(files: list[Path]) -> int:
-    """快速统计所有文件的行数（使用元数据，不读取数据）."""
+def _count_parquet_rows(file_iter: list[Path] | Iterator[Path]) -> int:
+    """统计parquet文件行数（通用函数）."""
     total = 0
-    for fp in files:
+    for fp in file_iter:
         try:
             total += pq.read_metadata(fp).num_rows
         except Exception as e:
             logger.warning(f"无法读取 {fp} 元数据: {e}")
     return total
+
+
+def count_total_rows_fast(files: list[Path]) -> int:
+    """快速统计所有文件的行数（使用元数据，不读取数据）."""
+    return _count_parquet_rows(files)
 
 
 def count_written_rows(output_dir: Path, dataset_name: str, bucket_name: str) -> int:
     pattern = f"{dataset_name}-{bucket_name}-*.parquet"
-    total = 0
-    for fp in output_dir.glob(pattern):
-        try:
-            total += pq.read_metadata(fp).num_rows
-        except Exception as e:
-            logger.warning(f"无法读取 {fp} 元数据: {e}")
-    return total
+    return _count_parquet_rows(list(output_dir.glob(pattern)))
 
 
 def print_sample_texts(
@@ -622,6 +694,10 @@ def process_bucket_streaming(
     max_rows_per_file: int = DEFAULT_MAX_ROWS,
     buffer_size: int = DEFAULT_BATCH_SIZE,
 ) -> int:
+    """处理单个桶的数据，使用采样模式。
+    
+    对于github_code数据集，会先根据file_path过滤编程语言，再进行采样。
+    """
     if not files:
         logger.warning(f"桶 {bucket_name} 无数据文件")
         return 0
@@ -634,92 +710,23 @@ def process_bucket_streaming(
     if total_rows == 0:
         return 0
 
-    if target_count >= total_rows * 0.9:
-        logger.info(f"  [{bucket_name}] 全量处理模式")
-        _process_full(
-            files=files,
-            bucket_name=bucket_name,
-            dataset_name=dataset_name,
-            output_dir=output_dir,
-            workers=workers,
-            tasks=tasks,
-            max_rows_per_file=max_rows_per_file,
-            buffer_size=buffer_size,
-            text_column=text_column,
-        )
-    else:
-        logger.info(f"  [{bucket_name}] 流式采样模式")
-        _process_sampled(
-            files=files,
-            bucket_name=bucket_name,
-            target_count=target_count,
-            seed=seed,
-            dataset_name=dataset_name,
-            output_dir=output_dir,
-            workers=workers,
-            tasks=tasks,
-            max_rows_per_file=max_rows_per_file,
-            buffer_size=buffer_size,
-            text_column=text_column,
-        )
+    _process_sampled(
+        files=files,
+        bucket_name=bucket_name,
+        target_count=target_count,
+        seed=seed,
+        dataset_name=dataset_name,
+        output_dir=output_dir,
+        workers=workers,
+        tasks=tasks,
+        max_rows_per_file=max_rows_per_file,
+        buffer_size=buffer_size,
+        text_column=text_column,
+    )
 
     actual_written = count_written_rows(output_dir, dataset_name, bucket_name)
     logger.info(f"  [{bucket_name}] 实际写入: {actual_written:,} 行")
     return actual_written
-
-
-def _process_full(
-    files: list[Path],
-    bucket_name: str,
-    dataset_name: str,
-    output_dir: Path,
-    workers: int,
-    tasks: int,
-    max_rows_per_file: int,
-    buffer_size: int,
-    text_column: str,
-) -> None:
-    bucket_dir = find_bucket_dir(files, bucket_name)
-    row_idx_adapter = create_row_index_adapter(text_column)
-
-    pipeline: list[PipelineStep] = [
-        ParquetReader(
-            data_folder=str(bucket_dir),
-            glob_pattern="**/*.parquet",
-            text_key=text_column,
-            adapter=row_idx_adapter,
-        ),
-    ]
-
-    # 对 github_code 数据集添加语言过滤器
-    if "github" in dataset_name.lower():
-        pipeline.append(LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES))
-
-    pipeline.extend(
-        [
-            SourceTagger(dataset_name=dataset_name, bucket_name=bucket_name),
-            TokenizerDataWriter(
-                output_dir=str(output_dir),
-                dataset_name=dataset_name,
-                bucket_name=bucket_name,
-                max_rows_per_file=max_rows_per_file,
-                buffer_size=buffer_size,
-                include_language="github" in dataset_name.lower(),
-            ),
-        ]
-    )
-
-    actual_tasks = calculate_tasks(tasks, workers, len(files))
-
-    executor = LocalPipelineExecutor(
-        pipeline=pipeline,
-        tasks=actual_tasks,
-        workers=workers,
-        logging_dir=str(output_dir / "logs" / dataset_name / bucket_name),
-        randomize_start_duration=RANDOMIZE_START_DURATION,
-    )
-
-    executor.run()
 
 
 def _process_sampled(
@@ -735,12 +742,34 @@ def _process_sampled(
     buffer_size: int,
     text_column: str,
 ) -> None:
-    indices = precompute_sampling_indices(
-        files=files,
-        bucket_name=bucket_name,
-        seed=seed,
-        target_count=target_count,
-    )
+    """采样处理流程。
+    
+    对于github_code数据集：
+    1. 先读取文件内容，根据file_path过滤出目标编程语言的文档
+    2. 对过滤后的文档计算采样索引
+    3. 按索引采样并输出
+    
+    对于其他数据集：
+    1. 直接计算采样索引
+    2. 按索引采样并输出
+    """
+    # 对github_code数据集，先过滤语言再进行采样
+    if "github" in dataset_name.lower():
+        logger.info(f"  [{bucket_name}] github_code: 先过滤语言再采样")
+        indices = precompute_sampling_indices(
+            files=files,
+            bucket_name=bucket_name,
+            seed=seed,
+            target_count=target_count,
+            allowed_extensions=ALLOWED_LANGUAGES,
+        )
+    else:
+        indices = precompute_sampling_indices(
+            files=files,
+            bucket_name=bucket_name,
+            seed=seed,
+            target_count=target_count,
+        )
 
     if not indices:
         logger.warning(f"  [{bucket_name}] 采样索引为空")
@@ -762,7 +791,7 @@ def _process_sampled(
         IndexFilter(indices=indices),
     ]
 
-    # 对 github_code 数据集添加语言过滤器
+    # github_code数据集：添加语言标记（过滤已在采样前完成）
     if "github" in dataset_name.lower():
         pipeline.append(LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES))
 
@@ -1000,7 +1029,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 使用默认配置 (针对32核/250GB/400MB/s优化)
+  # 使用默认配置 (针对16核/250GB/400MB/s优化)
   python scripts/prepare_tokenizer_data.py
 
   # 调整workers数量 (建议不超过16以避免进程切换开销)

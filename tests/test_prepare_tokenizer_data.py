@@ -25,15 +25,21 @@ from scripts.prepare_tokenizer_data import (
     compute_doc_hash,
     count_total_rows_fast,
     determine_text_column,
+    get_file_extension,
     load_config,
     precompute_sampling_indices,
     save_sampling_info,
 )
 
 
-def create_test_parquet(path: Path, num_rows: int, text_key: str = "text") -> Path:
+def create_test_parquet(
+    path: Path, num_rows: int, text_key: str = "text", file_path_col: str | None = None
+) -> Path:
     """辅助函数：创建测试 Parquet 文件。"""
-    table = pa.table({text_key: [f"text_{i}" for i in range(num_rows)]})
+    data = {text_key: [f"text_{i}" for i in range(num_rows)]}
+    if file_path_col:
+        data[file_path_col] = [f"path/to/file_{i}.py" for i in range(num_rows)]
+    table = pa.table(data)
     file_path = path / "test.parquet"
     pq.write_table(table, file_path)
     return file_path
@@ -45,10 +51,11 @@ def create_test_documents(file_path: Path, num_docs: int) -> list[Document]:
         Document(
             text=f"text_{i}",
             id=f"doc_{i}",
-            metadata={"file_path": str(file_path), "row_idx": i},
+            metadata={"parquet_path": str(file_path), "row_idx": i},
         )
         for i in range(num_docs)
     ]
+
 
 def create_source_document(
     text: str = "test",
@@ -131,6 +138,27 @@ class TestDetermineTextColumn:
     )
     def test_other_datasets(self, dataset_name):
         assert determine_text_column(dataset_name) == "text"
+
+
+class TestGetFileExtension:
+    """测试全局函数 get_file_extension。"""
+
+    def test_common_extensions(self):
+        assert get_file_extension("test.py") == ".py"
+        assert get_file_extension("/path/to/file.cpp") == ".cpp"
+        assert get_file_extension("script.js") == ".js"
+        assert get_file_extension("App.tsx") == ".tsx"
+
+    def test_empty_and_none(self):
+        assert get_file_extension("") is None
+
+    def test_no_extension(self):
+        assert get_file_extension("Makefile") is None
+        assert get_file_extension("/path/to/README") is None
+
+    def test_case_insensitive(self):
+        assert get_file_extension("file.PY") == ".py"
+        assert get_file_extension("file.CPP") == ".cpp"
 
 
 class TestLoadConfig:
@@ -220,6 +248,22 @@ class TestPrecomputeSamplingIndices:
 
         assert sum(len(v) for v in indices.values()) == 5
 
+    def test_with_allowed_extensions(self, tmp_path):
+        """测试带扩展名过滤的预计算采样。"""
+        # 创建包含 file_path 列的 parquet 文件
+        file_path = create_test_parquet(tmp_path, 20, file_path_col="file_path")
+
+        indices = precompute_sampling_indices(
+            files=[file_path],
+            bucket_name="test",
+            seed=42,
+            target_count=5,
+            allowed_extensions={".py", ".js"},
+        )
+
+        # 应该返回索引（所有测试数据都是 .py 扩展名）
+        assert sum(len(v) for v in indices.values()) == 5
+
 
 class TestIndexFilter:
     def test_filters_by_indices(self, tmp_path):
@@ -249,18 +293,13 @@ class TestIndexFilter:
 
     def test_works_with_parquet_reader(self, tmp_path):
         from datatrove.pipeline.readers import ParquetReader
-
         from scripts.prepare_tokenizer_data import create_row_index_adapter
 
-        file_path = create_test_parquet(tmp_path, 10)
-
-        indices = precompute_sampling_indices(
-            files=[file_path],
-            bucket_name="test",
-            seed=42,
-            target_count=5,
-        )
-
+        # 创建测试文件（结果未使用，但为了创建文件）
+        _ = create_test_parquet(tmp_path, 10)
+        # 使用相对路径创建索引，与 ParquetReader 行为一致
+        relative_path = "test.parquet"
+        indices = {relative_path: {0, 1, 2, 3, 4}}
         filter_step = IndexFilter(indices=indices)
         adapter = create_row_index_adapter("text")
         reader = ParquetReader(
@@ -268,11 +307,9 @@ class TestIndexFilter:
             glob_pattern="*.parquet",
             adapter=adapter,
         )
-
         docs = list(reader.read_file("test.parquet"))
-        filtered = list(filter_step.run(iter(docs), rank=0, world_size=1))
-
-        assert len(filtered) == 5
+        result = list(filter_step.run(iter(docs), rank=0, world_size=1))
+        assert len(result) == 5
 
     def test_accepts_list_indices(self, tmp_path):
         """测试 IndexFilter 接受 list 格式的索引（JSON 序列化场景）。"""
@@ -305,18 +342,18 @@ class TestIndexFilter:
 
         assert filter_step.indices["test.parquet"] == set()
 
-    def test_matches_filename_only_path(self, tmp_path):
-        """测试 IndexFilter 支持文件名匹配（ParquetReader 只提供文件名）。"""
+    def test_matches_by_parquet_path(self, tmp_path):
+        """测试 IndexFilter 使用 parquet_path 匹配索引。"""
         file_path = create_test_parquet(tmp_path, 10)
         # 使用完整路径创建索引
         filter_step = IndexFilter(indices={file_path: {1, 3, 5}})
 
-        # 但文档的 file_path 只有文件名（模拟 ParquetReader 行为）
+        # 文档使用 parquet_path 和 row_idx
         docs = [
             Document(
                 text=f"text_{i}",
                 id=f"doc_{i}",
-                metadata={"file_path": file_path.name, "row_idx": i},
+                metadata={"parquet_path": str(file_path), "row_idx": i},
             )
             for i in range(10)
         ]
@@ -325,34 +362,45 @@ class TestIndexFilter:
         assert len(result) == 3
         assert {doc.metadata["row_idx"] for doc in result} == {1, 3, 5}
 
-    def test_matches_both_full_path_and_filename(self, tmp_path):
-        """测试 IndexFilter 同时支持完整路径和文件名匹配。"""
-        file_path = create_test_parquet(tmp_path, 10)
-        filter_step = IndexFilter(indices={file_path: {2, 4}})
+    def test_matches_different_paths_same_filename(self, tmp_path):
+        """测试 IndexFilter 区分不同路径但文件名相同的情况。"""
+        # 创建两个不同目录下的同名文件
+        dir1 = tmp_path / "dir1"
+        dir1.mkdir()
+        file1 = create_test_parquet(dir1, 10)
 
-        # 混合使用完整路径和文件名
-        docs_full_path = [
+        dir2 = tmp_path / "dir2"
+        dir2.mkdir()
+        file2 = create_test_parquet(dir2, 10)
+
+        # 只为 file1 创建索引
+        filter_step = IndexFilter(indices={file1: {2, 4}})
+
+        # file1 的文档应该通过
+        docs1 = [
             Document(
-                text="text_0",
-                id="doc_0",
-                metadata={"file_path": str(file_path), "row_idx": 2},
+                text=f"text_{i}",
+                id=f"doc_{i}",
+                metadata={"parquet_path": str(file1), "row_idx": i},
             )
+            for i in range(10)
         ]
-        docs_filename = [
+
+        # file2 的文档不应该通过
+        docs2 = [
             Document(
-                text="text_1",
-                id="doc_1",
-                metadata={"file_path": file_path.name, "row_idx": 4},
+                text=f"text_{i}",
+                id=f"doc_{i}",
+                metadata={"parquet_path": str(file2), "row_idx": i},
             )
+            for i in range(10)
         ]
 
-        result_full = list(filter_step.run(iter(docs_full_path), rank=0, world_size=1))
-        result_name = list(filter_step.run(iter(docs_filename), rank=0, world_size=1))
+        result1 = list(filter_step.run(iter(docs1), rank=0, world_size=1))
+        result2 = list(filter_step.run(iter(docs2), rank=0, world_size=1))
 
-        assert len(result_full) == 1
-        assert len(result_name) == 1
-        assert result_full[0].metadata["row_idx"] == 2
-        assert result_name[0].metadata["row_idx"] == 4
+        assert len(result1) == 2
+        assert len(result2) == 0
 
 
 class TestCreateRowIndexAdapter:
@@ -411,7 +459,7 @@ class TestCreateRowIndexAdapter:
         result = adapter(None, {"text": "test"}, "/path/to/file.parquet", 123)
 
         assert result["metadata"]["row_idx"] == 123
-        assert result["metadata"]["file_path"] == "/path/to/file.parquet"
+        assert result["metadata"]["parquet_path"] == "/path/to/file.parquet"
 
 
 class TestCountTotalRowsFast:
@@ -601,7 +649,6 @@ class TestFindBucketDir:
         assert result == bucket_dir
 
 
-
 class TestLanguageTagger:
     def test_tags_python_files(self):
         doc = Document(
@@ -669,12 +716,6 @@ class TestLanguageTagger:
         assert result[2].metadata["language"] == "javascript"
         assert result[3].metadata["language"] == "typescript"
 
-    def test_get_file_extension_static_method(self):
-        assert LanguageTagger._get_file_extension("test.py") == ".py"
-        assert LanguageTagger._get_file_extension("/path/to/file.cpp") == ".cpp"
-        assert LanguageTagger._get_file_extension("no_extension") is None
-        assert LanguageTagger._get_file_extension("") is None
-
     def test_language_extensions_constant(self):
         assert ".py" in LANGUAGE_EXTENSIONS
         assert ".cpp" in LANGUAGE_EXTENSIONS
@@ -687,7 +728,6 @@ class TestLanguageTagger:
         assert ".py" in ALLOWED_LANGUAGES
         assert ".cpp" in ALLOWED_LANGUAGES
         assert ".unknown" not in ALLOWED_LANGUAGES
-
 
     def test_includes_language_column_when_enabled(self, tmp_path):
         output_dir = tmp_path / "output"
