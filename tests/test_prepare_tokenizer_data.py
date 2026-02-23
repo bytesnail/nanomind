@@ -383,16 +383,14 @@ class TestCreateRowIndexAdapter:
         assert result["id"] == f"{path}#5"
 
     def test_metadata_priority_over_data_columns(self):
-        """测试 adapter 设置的 metadata 优先于 data 中的同名列。
+        """测试 adapter 正确区分 file_path 和 parquet_path。
 
-        这是关键测试：github_code 数据集本身有 file_path 列（如 "README.md"），
-        但 adapter 需要确保设置的是 parquet 文件路径（如 "train_000.parquet"），
-        以便 IndexFilter 能正确匹配。
+        对于 github_code 数据集：
+        - file_path 保留原始代码文件路径（如 "README.md"），供 LanguageTagger 使用
+        - parquet_path 存储 parquet 文件路径（如 "train_000.parquet"），供 IndexFilter 使用
         """
         adapter = create_row_index_adapter("content")
         parquet_path = "data/datasets/github-code/train_000.parquet"
-
-        # 模拟 github_code 数据集：data 中包含 file_path 和 content 列
         data = {
             "content": "def hello(): pass",
             "file_path": "README.md",  # 数据集自带的文件路径列
@@ -401,8 +399,9 @@ class TestCreateRowIndexAdapter:
 
         result = adapter(None, data, parquet_path, 42)
 
-        # 关键验证：metadata 中的 file_path 必须是 parquet 路径，而不是 README.md
-        assert result["metadata"]["file_path"] == parquet_path
+        # 关键验证：file_path 保留原始文件路径，parquet_path 存储 parquet 路径
+        assert result["metadata"]["file_path"] == "README.md"
+        assert result["metadata"]["parquet_path"] == parquet_path
         assert result["metadata"]["row_idx"] == 42
         assert result["metadata"]["repo_id"] == "github/user/repo"  # 其他列保留
 

@@ -225,7 +225,10 @@ def create_row_index_adapter(
             metadata = {"metadata": metadata}
 
         metadata["row_idx"] = id_in_file
-        metadata["file_path"] = path
+        # 保留原始 file_path（如果存在），否则使用 parquet 文件路径
+        if "file_path" not in data:
+            metadata["file_path"] = path
+        metadata["parquet_path"] = path
 
         original_id = data.pop(id_key, None)
 
@@ -343,10 +346,18 @@ class IndexFilter(PipelineStep):
         world_size: int = 1,  # noqa: ARG002
     ) -> Iterator[Document]:
         for doc in data:
+            # 优先使用 parquet_path（github_code 数据集），否则使用 file_path
+            parquet_path = doc.metadata.get("parquet_path", "")
             file_path = doc.metadata.get("file_path", "")
             row_idx = doc.metadata.get("row_idx")
-            # 同时尝试完整路径和文件名匹配
-            if file_path in self.indices and row_idx in self.indices[file_path]:
+            # 同时尝试 parquet_path 和 file_path 匹配
+            matched_path = None
+            if parquet_path in self.indices:
+                matched_path = parquet_path
+            elif file_path in self.indices:
+                matched_path = file_path
+            
+            if matched_path and row_idx in self.indices[matched_path]:
                 self.stat_update("passed", value=1)
                 yield doc
             else:
