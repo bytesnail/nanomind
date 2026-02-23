@@ -204,15 +204,17 @@ def determine_text_column(dataset_name: str) -> str:
 
 
 def create_row_index_adapter(
+    dataset_name: str,
+    bucket_name: str,
     text_key: str = "text",
-    id_key: str = "id",
 ) -> Callable[..., dict]:
     """创建行索引适配器。
 
-    id 格式: {完整路径}#{index}，与 fineweb_adapter 保持一致
+    id 格式统一为: {dataset_name}/{bucket_name}/{filename}.parquet#{row_idx}
+    例如: fineweb_edu_en/4.0/00000.parquet#123
     """
 
-    def adapter(_self: Any, data: dict, path: str, id_in_file: int | str) -> dict:
+    def adapter(reader: Any, data: dict, path: str, id_in_file: int | str) -> dict:
         metadata = data.pop("metadata", {})
         if isinstance(metadata, str):
             try:
@@ -223,17 +225,23 @@ def create_row_index_adapter(
             metadata = {"metadata": metadata}
 
         metadata["row_idx"] = id_in_file
-        # 保留原始 file_path（如果存在），否则使用 parquet 文件路径
-        if "file_path" not in data:
-            metadata["file_path"] = path
-        metadata["parquet_path"] = path
 
-        original_id = data.pop(id_key, None)
+        # parquet_path 使用相对路径，格式如：data/datasets/fineweb/en/4.0/00000.parquet
+        bucket_abs_path = Path(reader.data_folder.path)
+        try:
+            bucket_rel_path = bucket_abs_path.relative_to(Path.cwd())
+        except ValueError:
+            bucket_rel_path = bucket_abs_path
+        rel_path = str(bucket_rel_path / path)
+        metadata["parquet_path"] = rel_path
 
-        if original_id and "#" in str(original_id):
-            doc_id = str(original_id)
-        else:
-            doc_id = f"{path}#{id_in_file}"
+        # file_path 保留原始数据中的 file_path 字段值（主要针对 github_code 数据集）
+        if "file_path" in data:
+            metadata["file_path"] = data.pop("file_path")
+
+        # 统一生成 id 格式: {dataset_name}/{bucket_name}/{filename}.parquet#{row_idx}
+        filename = Path(path).name
+        doc_id = f"{dataset_name}/{bucket_name}/{filename}#{id_in_file}"
 
         return {
             "text": data.pop(text_key, ""),
@@ -330,7 +338,7 @@ def precompute_sampling_indices(
     ):
         try:
             num_rows = pq.read_metadata(fp).num_rows
-            base_doc_id = f"{bucket_name}#{fp.resolve()}#"
+            base_doc_id = f"{bucket_name}#{fp}#"
 
             for row_idx in range(num_rows):
                 doc_id = f"{base_doc_id}{row_idx}"
@@ -372,7 +380,7 @@ def _precompute_with_content_filter(
         try:
             table = pq.read_table(fp, columns=["file_path"])
             file_paths = table["file_path"].to_pylist()
-            base_doc_id = f"{bucket_name}#{fp.resolve()}#"
+            base_doc_id = f"{bucket_name}#{fp}#"
 
             for row_idx, file_path in enumerate(file_paths):
                 ext = get_file_extension(str(file_path))
@@ -779,7 +787,7 @@ def _process_sampled(
     logger.info(f"  [{bucket_name}] 已选择 {selected_count:,} 个索引，开始流式读取...")
 
     bucket_dir = find_bucket_dir(files, bucket_name)
-    row_idx_adapter = create_row_index_adapter(text_column)
+    row_idx_adapter = create_row_index_adapter(dataset_name, bucket_name, text_column)
 
     pipeline: list[PipelineStep] = [
         ParquetReader(

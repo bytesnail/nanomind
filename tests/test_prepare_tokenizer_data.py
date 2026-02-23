@@ -294,20 +294,24 @@ class TestIndexFilter:
     def test_works_with_parquet_reader(self, tmp_path):
         from datatrove.pipeline.readers import ParquetReader
         from scripts.prepare_tokenizer_data import create_row_index_adapter
-
-        # 创建测试文件（结果未使用，但为了创建文件）
+        # 创建测试文件
         _ = create_test_parquet(tmp_path, 10)
-        # 使用相对路径创建索引，与 ParquetReader 行为一致
-        relative_path = "test.parquet"
-        indices = {relative_path: {0, 1, 2, 3, 4}}
-        filter_step = IndexFilter(indices=indices)
-        adapter = create_row_index_adapter("text")
+        adapter = create_row_index_adapter(
+            dataset_name="test_dataset",
+            bucket_name="test_bucket",
+            text_key="text"
+        )
         reader = ParquetReader(
             data_folder=str(tmp_path),
             glob_pattern="*.parquet",
             adapter=adapter,
         )
         docs = list(reader.read_file("test.parquet"))
+        # 获取第一个文档的 parquet_path 作为索引键
+        first_doc = docs[0]
+        parquet_path = first_doc.metadata.get("parquet_path", "")
+        indices = {parquet_path: {0, 1, 2, 3, 4}}
+        filter_step = IndexFilter(indices=indices)
         result = list(filter_step.run(iter(docs), rank=0, world_size=1))
         assert len(result) == 5
 
@@ -404,31 +408,69 @@ class TestIndexFilter:
 
 
 class TestCreateRowIndexAdapter:
-    def test_fineweb_id_preserved(self):
-        adapter = create_row_index_adapter("text", "id")
-        result = adapter(
-            None,
-            {"text": "test", "id": "data/datasets/fineweb/file.parquet#123"},
-            "/path/to/file.parquet",
-            0,
+    def test_unified_id_format(self):
+        """测试统一 id 格式: {dataset_name}/{bucket_name}/{filename}.parquet#{row_idx}"""
+        adapter = create_row_index_adapter(
+            dataset_name="fineweb_edu_en",
+            bucket_name="4.0",
+            text_key="text"
         )
-        assert result["id"] == "data/datasets/fineweb/file.parquet#123"
-
-    def test_full_path_id_format(self):
-        adapter = create_row_index_adapter("text", "id")
+        
+        class MockReader:
+            class data_folder:
+                # 使用相对于cwd的路径，避免暴露本地绝对路径
+                path = "data/datasets/fineweb/en/4.0"
+        
         result = adapter(
-            None,
+            MockReader(),
             {"text": "test"},
-            "/data/datasets/github/repo/file.parquet",
+            "00000.parquet",
+            123,
+        )
+        assert result["id"] == "fineweb_edu_en/4.0/00000.parquet#123"
+
+    def test_id_format_with_github_code(self):
+        """测试 github_code 数据集的统一 id 格式"""
+        adapter = create_row_index_adapter(
+            dataset_name="github_code_2025",
+            bucket_name="10star",
+            text_key="content"
+        )
+        
+        class MockReader:
+            class data_folder:
+                # 使用相对于cwd的路径，避免暴露本地绝对路径
+                path = "data/datasets/github-code/2025-01/python"
+        
+        result = adapter(
+            MockReader(),
+            {"content": "def hello(): pass"},
+            "train-00000.parquet",
             42,
         )
-        assert result["id"] == "/data/datasets/github/repo/file.parquet#42"
+        assert result["id"] == "github_code_2025/10star/train-00000.parquet#42"
 
-    def test_id_format_matches_fineweb_adapter(self):
-        adapter = create_row_index_adapter("text", "id")
-        path = "data/datasets/nick007x/github-code-2025/bucket/data.parquet"
-        result = adapter(None, {"text": "test"}, path, 5)
-        assert result["id"] == f"{path}#5"
+    def test_original_id_ignored(self):
+        """测试原始数据中的 id 字段被忽略，使用统一生成的 id"""
+        adapter = create_row_index_adapter(
+            dataset_name="fineweb_edu_en",
+            bucket_name="4.0",
+            text_key="text"
+        )
+        
+        class MockReader:
+            class data_folder:
+                # 使用相对于cwd的路径，避免暴露本地绝对路径
+                path = "data/datasets/fineweb/en/4.0"
+        
+        result = adapter(
+            MockReader(),
+            {"text": "test", "id": "data/CC-MAIN-2013-48/train.parquet#999"},
+            "00000.parquet",
+            123,
+        )
+        # 即使原始数据有 id，也应该使用统一格式
+        assert result["id"] == "fineweb_edu_en/4.0/00000.parquet#123"
 
     def test_metadata_priority_over_data_columns(self):
         """测试 adapter 正确区分 file_path 和 parquet_path。
@@ -437,29 +479,48 @@ class TestCreateRowIndexAdapter:
         - file_path 保留原始代码文件路径（如 "README.md"），供 LanguageTagger 使用
         - parquet_path 存储 parquet 文件路径（如 "train_000.parquet"），供 IndexFilter 使用
         """
-        adapter = create_row_index_adapter("content")
-        parquet_path = "data/datasets/github-code/train_000.parquet"
+        adapter = create_row_index_adapter(
+            dataset_name="github_code_2025",
+            bucket_name="10star",
+            text_key="content"
+        )
+        
+        class MockReader:
+            class data_folder:
+                # 使用相对于cwd的路径，避免暴露本地绝对路径
+                path = "data/datasets/github-code/2025-01/python"
+        
         data = {
             "content": "def hello(): pass",
             "file_path": "README.md",  # 数据集自带的文件路径列
             "repo_id": "github/user/repo",
         }
 
-        result = adapter(None, data, parquet_path, 42)
+        result = adapter(MockReader(), data, "train-00000.parquet", 42)
 
-        # 关键验证：file_path 保留原始文件路径，parquet_path 存储 parquet 路径
+        # 关键验证：file_path 保留原始文件路径，parquet_path 存储相对路径
         assert result["metadata"]["file_path"] == "README.md"
-        assert result["metadata"]["parquet_path"] == parquet_path
+        assert result["metadata"]["parquet_path"] == "data/datasets/github-code/2025-01/python/train-00000.parquet"
         assert result["metadata"]["row_idx"] == 42
         assert result["metadata"]["repo_id"] == "github/user/repo"  # 其他列保留
 
     def test_row_idx_in_metadata(self):
         """测试 row_idx 被正确设置到 metadata 中。"""
-        adapter = create_row_index_adapter("text")
-        result = adapter(None, {"text": "test"}, "/path/to/file.parquet", 123)
+        adapter = create_row_index_adapter(
+            dataset_name="fineweb_edu_en",
+            bucket_name="4.0",
+            text_key="text"
+        )
+        
+        class MockReader:
+            class data_folder:
+                # 使用相对于cwd的路径，避免暴露本地绝对路径
+                path = "data/datasets/fineweb/en/4.0"
+        
+        result = adapter(MockReader(), {"text": "test"}, "00000.parquet", 123)
 
         assert result["metadata"]["row_idx"] == 123
-        assert result["metadata"]["parquet_path"] == "/path/to/file.parquet"
+        assert result["metadata"]["parquet_path"] == "data/datasets/fineweb/en/4.0/00000.parquet"
 
 
 class TestCountTotalRowsFast:
