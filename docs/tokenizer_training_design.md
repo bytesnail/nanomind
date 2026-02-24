@@ -304,6 +304,10 @@ pipeline = [
 
 ### 3.3 Tokenizer 训练
 
+**训练方法概述**:
+
+新的tokenizer使用 **`train_new_from_iterator`** 方法训练，该方法会自动继承模板tokenizer的所有配置，无需手动复制和修改各种配置项。
+
 ```bash
 python scripts/train_tokenizer.py \
     --data-dir data/datasets/nanomind_tokenizer \
@@ -319,72 +323,70 @@ python scripts/train_tokenizer.py \
    ```python
    from transformers import AutoTokenizer
    
-   # 加载完整的 Qwen2Tokenizer 作为模板
+   # 从保存的模板目录加载完整的 Qwen2Tokenizer
    template = AutoTokenizer.from_pretrained(
        "output/qwen3_next_tokenizer",
        trust_remote_code=True
    )
    ```
 
-2. **提取模板配置（除词表外）**
-   - 从 `tokenizer.json` 提取：
-     - `normalizer`: NFC 标准化规则
-     - `pre_tokenizer`: ByteLevel + Regex Split 组合
-     - `post_processor`: ByteLevel 后处理
-     - `decoder`: ByteLevel 解码器
-   - 从 `tokenizer_config.json` 提取：
-     - `bos_token`, `eos_token`, `pad_token`, `unk_token` 的映射逻辑
-     - `model_max_length`, `clean_up_tokenization_spaces` 等元配置
+2. **使用 `train_new_from_iterator` 训练新tokenizer**
+   ```python
+   # 准备文本迭代器（从采样数据中流式读取）
+   def text_iterator():
+       for sample in load_samples(data_dir):
+           yield sample["text"]
+   
+   # 使用 train_new_from_iterator 训练
+   # 此方法会自动继承模板tokenizer的所有配置
+   new_tokenizer = template.train_new_from_iterator(
+       text_iterator(),
+       vocab_size=32005,  # 32000 BPE + 5个特殊token
+       new_special_tokens=[
+           "<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"
+       ]
+   )
+   
+   # 调整特殊token的ID映射
+   new_tokenizer.eos_token = "<|im_end|>"
+   new_tokenizer.pad_token = "<|endoftext|>"
+   new_tokenizer.bos_token = None
+   new_tokenizer.unk_token = None
+   ```
 
-3. **在采样数据上训练新词表**
-   - 使用 `tokenizers` 库创建空白 BPE trainer
-   - 在 800K 采样数据上学习 32000 个 BPE 合并规则
-   - 保持与模板相同的 pretokenizer 行为，确保兼容性
-
-4. **构建新的 Tokenizer 配置**
-   - 将训练得到的 32K 词表与模板的 normalizer/pretokenizer/decoder 组合
-   - 配置 `added_tokens`: 5 个特殊 token（ID 32000-32004）
-     - `<|endoftext|>` (32000), `<|im_start|>` (32001), `<|im_end|>` (32002)
-     - `<think>` (32003), `</think>` (32004)
-   - 配置 `extra_special_tokens`: 4 个 token（不含 `<|endoftext|>`）
-     - `<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`
-   - 保持与模板一致的 `eos_token`/`pad_token` 等模型属性映射
-   - 将训练得到的 32K 词表与模板的 normalizer/pretokenizer/decoder 组合
-   - 添加 5 个特殊 token（ID 32000-32004）到 `added_tokens`
-   - 配置 `extra_special_tokens` 仅包含推理相关 token
-   - 保持与模板一致的 `eos_token`/`pad_token` 等模型属性映射
-
-5. **保存并验证**
-   - 保存为与模板完全兼容的目录结构
-   - 验证所有配置项与模板一致（除词表和特殊token外）
+3. **保存并验证**
+   ```python
+   new_tokenizer.save_pretrained(output_dir)
+   ```
 
 **关键说明**:
 
-- 不同于传统的"空白初始化"，本方案**继承完整的 Qwen2Tokenizer 架构**，仅替换：
-  - 不同于传统的"空白初始化"，本方案**继承完整的 Qwen2Tokenizer 架构**，仅替换：
-  - `model.vocab`: 从数据新训练的 32K BPE 词表
-  - `added_tokens`: 5 个特殊 token（ID 32000-32004）
-  - `extra_special_tokens`: 4 个 token（`<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`），移除视觉/多模态相关 token
-  - `added_tokens`: 精简后的特殊 token 集合
-  - `extra_special_tokens`: 移除视觉/多模态相关 token，保留推理相关 token
+- **使用 `train_new_from_iterator` 的优势**:
+  - **自动继承配置**: 自动继承模板的 `normalizer`、`pre_tokenizer`、`post_processor`、`decoder` 等所有配置
+  - **避免手动错误**: 无需手动提取和复制各种tokenizer配置项
+  - **保持兼容性**: 确保新tokenizer与Qwen3-Next架构完全兼容
 
-- **模板继承的组件**（保持不变）：
-  | 组件 | 来源 | 说明 |
-  |------|------|------|
-  | `normalizer` | 模板 | NFC Unicode 标准化 |
-  | `pre_tokenizer` | 模板 | ByteLevel + Regex Split |
-  | `post_processor` | 模板 | ByteLevel 后处理 |
-  | `decoder` | 模板 | ByteLevel 解码器 |
-  | 模型属性映射 | 模板 | `eos_token`→`<|im_end|>`, `pad_token`→`<|endoftext|>` |
-  | `model_max_length` | 模板 | 1010000 |
-  | `clean_up_tokenization_spaces` | 模板 | false |
+- **与传统方法的区别**:
+  | 特性 | 传统方法（手动） | `train_new_from_iterator` 方法 |
+  |------|------------------|--------------------------------|
+  | 配置继承 | 手动提取和复制 `normalizer`、`pre_tokenizer` 等 | **自动继承**所有配置 |
+  | 特殊token处理 | 手动配置 `added_tokens` 和 `extra_special_tokens` | 通过 `new_special_tokens` 参数指定 |
+  | 属性映射 | 手动设置 `eos_token`、`pad_token` 等 | 训练后简单调整即可 |
+  | 错误风险 | 高（容易遗漏配置项） | **低**（自动处理） |
+  | 维护性 | 复杂 | **简单清晰** |
+
+- **模板路径**: `output/qwen3_next_tokenizer`（通过 `prepare_template.py` 保存的Qwen3-Next tokenizer模板）
+
+- **训练参数**:
+  - `vocab_size=32005`: 包含32000个BPE token + 5个特殊token（ID 32000-32004）
+  - `new_special_tokens`: 定义5个特殊token，训练后自动分配ID 32000-32004
 
 #### 训练内存优化
 
 | 阶段 | 内存瓶颈 | 优化策略 |
 |------|----------|----------|
 | **数据迭代** | 40M 文本加载 | 使用生成器流式迭代，batch_size=10000 |
-| **BPE 训练** | 词频统计 + 合并队列 | 使用 `tokenizers` 库的增量训练，控制并发 |
+| **BPE 训练** | 词频统计 + 合并队列 | `train_new_from_iterator` 内部优化，控制并发 |
 | **最终保存** | 完整词表序列化 | 直接写入磁盘，不驻留内存 |
 
 **训练时间估算**（参考值）:
@@ -575,14 +577,12 @@ pyarrow>=15.0.0
 
 | 函数/类 | 功能 |
 |---------|------|
-| `load_template_tokenizer()` | 从模板目录加载完整的 Qwen2Tokenizer |
-| `extract_template_config()` | 提取模板的 normalizer/pretokenizer/decoder 配置 |
-| `train_bpe_vocab()` | 在采样数据上训练 32K BPE 词表 |
-| `build_tokenizer_from_template()` | 将新词表与模板配置组合，创建完整 tokenizer |
-| `configure_special_tokens()` | 配置特殊 token：`added_tokens`（5个）和 `extra_special_tokens`（4个，不含`<\|endoftext\|>`） |
+| `load_template_tokenizer()` | 从 `output/qwen3_next_tokenizer` 加载模板 tokenizer |
+| `create_text_iterator()` | 创建文本迭代器，流式读取采样数据 |
+| `train_tokenizer_with_iterator()` | 使用 `train_new_from_iterator` 训练新 tokenizer（自动继承模板配置） |
+| `configure_special_token_mappings()` | 配置特殊 token 映射：`eos_token`, `pad_token`, `bos_token`, `unk_token` |
 | `verify_template_consistency()` | 验证输出与模板的一致性（除词表外） |
-| `main()` | CLI 入口，支持 --template-dir, --vocab-size, --validate 等参数 |
----
+| `main()` | CLI 入口，支持 `--template-dir`, `--vocab-size`, `--validate` 等参数 |
 
 ## 6. 附录
 
