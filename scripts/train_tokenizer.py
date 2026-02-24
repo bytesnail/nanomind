@@ -14,11 +14,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-
+from typing import Any
 
 import pyarrow.parquet as pq
 from tokenizers import Tokenizer
@@ -39,13 +40,18 @@ DEFAULT_VOCAB_SIZE = 32005
 DEFAULT_MIN_FREQUENCY = 2
 DEFAULT_BATCH_SIZE = 2000
 
-SPECIAL_TOKENS = [
-    "<|endoftext|>",
+# 定义自定义的特殊token（按添加顺序）
+# 1. <|endoftext|> - 作为 pad_token
+# 2-5. 对话和推理相关token
+EXTRA_SPECIAL_TOKENS = [
     "<|im_start|>",
     "<|im_end|>",
     "<|think|>",
     "<|/think|>",
 ]
+
+# 完整特殊token列表（用于训练时添加）
+SPECIAL_TOKENS = ["<|endoftext|>"] + EXTRA_SPECIAL_TOKENS
 
 SPECIAL_TOKENS_MAP = {
     "bos_token": None,
@@ -105,6 +111,36 @@ def load_template_tokenizer(template_dir: Path) -> Tokenizer:
         tokenizer.decoder = template.decoder
     logger.info("已复制模板架构配置 (pretokenizer/normalizer/decoder)")
     return tokenizer
+
+
+def load_tokenizer_config(template_dir: Path) -> dict[str, Any]:
+    """加载模板目录中的 tokenizer_config.json。
+
+    Args:
+        template_dir: 模板目录路径
+
+    Returns:
+        tokenizer_config.json 的内容
+    """
+    config_path = template_dir / "tokenizer_config.json"
+    if not config_path.exists():
+        logger.warning(f"模板配置文件不存在: {config_path}，将使用默认配置")
+        return {}
+
+    logger.info(f"加载模板配置: {config_path}")
+    with open(config_path, encoding="utf-8") as f:
+        config = json.load(f)
+
+    # 替换 extra_special_tokens 为我们自定义的
+    original_extra = config.get("extra_special_tokens", [])
+    config["extra_special_tokens"] = EXTRA_SPECIAL_TOKENS
+    logger.info(
+        f"替换 extra_special_tokens: {len(original_extra)} -> {len(EXTRA_SPECIAL_TOKENS)} 个token"
+    )
+    for token in EXTRA_SPECIAL_TOKENS:
+        logger.info(f"  - {token}")
+
+    return config
 
 
 def train_bpe_tokenizer(
@@ -167,12 +203,50 @@ def save_vocab_text(tokenizer: Tokenizer, output_path: Path) -> None:
 def create_transformers_tokenizer(
     tokenizer: Tokenizer,
     output_dir: Path,
+    template_config: dict[str, Any],
 ) -> PreTrainedTokenizerFast:
+    """创建 transformers 格式的 tokenizer，继承模板配置。
+
+    Args:
+        tokenizer: 训练好的 tokenizer 对象
+        output_dir: 输出目录
+        template_config: 从模板加载的配置
+    """
+    # 准备传给 PreTrainedTokenizerFast 的参数
+    # 优先使用 SPECIAL_TOKENS_MAP 中的设置，但允许模板配置补充其他字段
+    init_kwargs = dict(template_config)  # 复制模板配置
+
+    # 移除不应直接传给 __init__ 的字段
+    # 这些字段要么在 save_pretrained 后自动处理，要么需要特殊处理
+    fields_to_remove = [
+        "tokenizer_class",  # 我们在创建后手动设置
+        "is_local",  # 内部字段
+    ]
+    for field in fields_to_remove:
+        init_kwargs.pop(field, None)
+
+    # 使用我们的 SPECIAL_TOKENS_MAP 覆盖模板的特殊 token 设置
+    init_kwargs.update(SPECIAL_TOKENS_MAP)
+
     transformers_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
-        **SPECIAL_TOKENS_MAP,
+        **init_kwargs,
     )
+
+    # 保存时会自动生成 tokenizer_config.json
     transformers_tokenizer.save_pretrained(output_dir)
+
+    # 手动保存配置文件，确保 extra_special_tokens 正确
+    config_to_save = dict(template_config)
+    config_to_save["extra_special_tokens"] = EXTRA_SPECIAL_TOKENS
+    config_to_save.update(SPECIAL_TOKENS_MAP)
+    config_to_save["tokenizer_class"] = "PreTrainedTokenizerFast"
+
+    config_path = output_dir / "tokenizer_config.json"
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config_to_save, f, indent=2, ensure_ascii=False)
+    logger.info(f"配置文件已更新: {config_path}")
+
     logger.info(f"Tokenizer已保存到: {output_dir}")
     return transformers_tokenizer
 
@@ -203,6 +277,21 @@ def validate_tokenizer(
     logger.info(f"eos_token: {tokenizer.eos_token}")
     logger.info(f"pad_token: {tokenizer.pad_token}")
     logger.info(f"unk_token: {tokenizer.unk_token}")
+
+    # 验证 extra_special_tokens
+    config_path = Path(tokenizer.name_or_path) / "tokenizer_config.json"
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as f:
+            saved_config = json.load(f)
+        saved_extra = saved_config.get("extra_special_tokens", [])
+        if set(saved_extra) == set(EXTRA_SPECIAL_TOKENS):
+            logger.info(f"extra_special_tokens 配置正确: {saved_extra}")
+        else:
+            logger.error(
+                f"extra_special_tokens 不匹配! 期望: {EXTRA_SPECIAL_TOKENS}, 实际: {saved_extra}"
+            )
+            is_valid = False
+
     test_text = "<|im_start|>assistant\n<|think|>推理<|/think|>答案<|im_end|>"
     encoded = tokenizer(test_text, return_tensors="pt")
     decoded = tokenizer.decode(encoded["input_ids"][0], skip_special_tokens=False)
@@ -240,6 +329,10 @@ def train_tokenizer(
         logger.info(f"输出目录: {output_dir}")
         logger.info(f"词表大小: {vocab_size}")
         logger.info(f"最小词频: {min_frequency}")
+
+        # 加载模板配置
+        template_config = load_tokenizer_config(template_dir)
+
         tokenizer = load_template_tokenizer(template_dir)
         train_bpe_tokenizer(
             tokenizer=tokenizer,
@@ -249,7 +342,9 @@ def train_tokenizer(
         )
         add_special_tokens(tokenizer)
         output_dir.mkdir(parents=True, exist_ok=True)
-        transformers_tokenizer = create_transformers_tokenizer(tokenizer, output_dir)
+        transformers_tokenizer = create_transformers_tokenizer(
+            tokenizer, output_dir, template_config
+        )
         if validate:
             logger.info("")
             is_valid = validate_tokenizer(transformers_tokenizer, vocab_size)

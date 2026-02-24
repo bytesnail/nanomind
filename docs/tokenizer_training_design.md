@@ -58,7 +58,7 @@
 <|im_start|>user
 问题<|im_end|>
 <|im_start|>assistant
-<|think|>推理过程...<|/think|>
+<think>推理过程...</think>
 答案<|im_end|>
 ```
 
@@ -344,7 +344,7 @@ assert tokenizer.vocab_size == 32005
 print(tokenizer.special_tokens_map)
 
 # 编解码测试
-text = "<|im_start|>assistant\n<|think|>推理<|/think|>答案<|im_end|>"
+text = "<|im_start|>assistant\n<think>推理</think>答案<|im_end|>"
 encoded = tokenizer(text, return_tensors="pt")
 decoded = tokenizer.decode(encoded["input_ids"][0])
 assert text == decoded
