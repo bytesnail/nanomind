@@ -53,14 +53,12 @@ DEFAULT_MIN_FREQUENCY = 2
 BPE_VOCAB_SIZE = 32000  # 实际 BPE 词表大小 (不含特殊 token)
 
 EXTRA_SPECIAL_TOKENS = [
-    "<|im_start|>",  # 不含 <|endoftext|>
+    "<|im_start|>",
     "<|im_end|>",
     "<think>",
     "</think>",
 ]
 
-# SPECIAL_TOKENS = <|endoftext|> + EXTRA_SPECIAL_TOKENS
-# <|endoftext|> 必须是第一个（ID 32000）
 SPECIAL_TOKENS = ["<|endoftext|>"] + EXTRA_SPECIAL_TOKENS  # ID 32000-32004
 
 
