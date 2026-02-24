@@ -7,8 +7,8 @@
 
 输出:
     output/tokenizer_32k/
-    ├── tokenizer.json
-    └── tokenizer_config.json
+    ├── tokenizer.json          # 核心词表模型
+    └── tokenizer_config.json   # 配置文件
 """
 
 from __future__ import annotations
@@ -37,6 +37,8 @@ DEFAULT_DATA_DIR = Path("data/datasets/nanomind_tokenizer")
 DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
 DEFAULT_OUTPUT_DIR = Path("output/tokenizer_32k")
 DEFAULT_VOCAB_SIZE = 32005
+# BPE词表大小 = vocab_size - len(SPECIAL_TOKENS) = 32005 - 5 = 32000
+# 特殊token从ID 32000开始添加
 DEFAULT_MIN_FREQUENCY = 2
 DEFAULT_BATCH_SIZE = 2000
 
@@ -70,15 +72,15 @@ def find_parquet_files(data_dir: Path) -> list[Path]:
 
 
 def stream_texts_from_parquet(
-    files: list[Path],
-    batch_size: int = DEFAULT_BATCH_SIZE,
+        files: list[Path],
+        batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> Iterator[list[str]]:
     total_rows = 0
     for fp in tqdm(files, desc="读取数据文件"):
         try:
             parquet_file = pq.ParquetFile(fp)
             for record_batch in parquet_file.iter_batches(
-                columns=["text"], batch_size=batch_size
+                    columns=["text"], batch_size=batch_size
             ):
                 texts = [
                     text
@@ -92,6 +94,44 @@ def stream_texts_from_parquet(
             logger.warning(f"读取文件失败 {fp}: {e}")
             continue
     logger.info(f"总共读取 {total_rows:,} 条文本")
+
+
+def _calculate_bpe_vocab_size(vocab_size: int) -> int:
+    """计算BPE词表大小（排除特殊token）.
+
+    Args:
+        vocab_size: 目标总词表大小
+
+    Returns:
+        BPE词表大小
+    """
+    return vocab_size - len(SPECIAL_TOKENS)
+
+
+def _get_special_token_base_id(vocab_size: int) -> int:
+    """获取特殊token的起始ID.
+
+    Args:
+        vocab_size: 目标总词表大小
+
+    Returns:
+        第一个特殊token的ID
+    """
+    return _calculate_bpe_vocab_size(vocab_size)
+
+
+def _merge_special_tokens_config(config: dict[str, Any]) -> dict[str, Any]:
+    """合并特殊token配置到配置字典中.
+
+    Args:
+        config: 原始配置字典
+
+    Returns:
+        合并后的配置字典
+    """
+    config["extra_special_tokens"] = EXTRA_SPECIAL_TOKENS
+    config.update(SPECIAL_TOKENS_MAP)
+    return config
 
 
 def load_template_tokenizer(template_dir: Path) -> Tokenizer:
@@ -133,10 +173,11 @@ def load_tokenizer_config(template_dir: Path) -> dict[str, Any]:
 
     # 替换 extra_special_tokens 为我们自定义的
     original_extra = config.get("extra_special_tokens", [])
-    config["extra_special_tokens"] = EXTRA_SPECIAL_TOKENS
+    config = _merge_special_tokens_config(config)
     logger.info(
         f"替换 extra_special_tokens: {len(original_extra)} -> {len(EXTRA_SPECIAL_TOKENS)} 个token"
     )
+
     for token in EXTRA_SPECIAL_TOKENS:
         logger.info(f"  - {token}")
 
@@ -144,16 +185,16 @@ def load_tokenizer_config(template_dir: Path) -> dict[str, Any]:
 
 
 def train_bpe_tokenizer(
-    tokenizer: Tokenizer,
-    data_dir: Path,
-    vocab_size: int,
-    min_frequency: int,
-    batch_size: int = DEFAULT_BATCH_SIZE,
+        tokenizer: Tokenizer,
+        data_dir: Path,
+        vocab_size: int,
+        min_frequency: int,
+        batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> None:
     files = find_parquet_files(data_dir)
     if not files:
         raise ValueError(f"在 {data_dir} 中未找到任何parquet文件")
-    bpe_vocab_size = vocab_size - len(SPECIAL_TOKENS)
+    bpe_vocab_size = _calculate_bpe_vocab_size(vocab_size)
     logger.info("开始训练BPE tokenizer")
     logger.info(f"  目标词表大小: {vocab_size}")
     logger.info(f"  BPE词表大小: {bpe_vocab_size}")
@@ -191,19 +232,10 @@ def add_special_tokens(tokenizer: Tokenizer) -> None:
             logger.info(f"  {token}: ID {actual_id}")
 
 
-def save_vocab_text(tokenizer: Tokenizer, output_path: Path) -> None:
-    vocab = tokenizer.get_vocab()
-    sorted_vocab = sorted(vocab.items(), key=lambda x: x[1])
-    with open(output_path, "w", encoding="utf-8") as f:
-        for token, _token_id in sorted_vocab:
-            f.write(f"{token}\n")
-    logger.info(f"词表已保存: {output_path}")
-
-
 def create_transformers_tokenizer(
-    tokenizer: Tokenizer,
-    output_dir: Path,
-    template_config: dict[str, Any],
+        tokenizer: Tokenizer,
+        output_dir: Path,
+        template_config: dict[str, Any],
 ) -> PreTrainedTokenizerFast:
     """创建 transformers 格式的 tokenizer，继承模板配置。
 
@@ -226,7 +258,7 @@ def create_transformers_tokenizer(
         init_kwargs.pop(field, None)
 
     # 使用我们的 SPECIAL_TOKENS_MAP 覆盖模板的特殊 token 设置
-    init_kwargs.update(SPECIAL_TOKENS_MAP)
+    init_kwargs = _merge_special_tokens_config(init_kwargs)
 
     transformers_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
@@ -236,13 +268,10 @@ def create_transformers_tokenizer(
     # 保存时会自动生成 tokenizer_config.json
     transformers_tokenizer.save_pretrained(output_dir)
 
-    # 手动保存配置文件，确保 extra_special_tokens 正确
-    config_to_save = dict(template_config)
-    config_to_save["extra_special_tokens"] = EXTRA_SPECIAL_TOKENS
-    config_to_save.update(SPECIAL_TOKENS_MAP)
-    config_to_save["tokenizer_class"] = "PreTrainedTokenizerFast"
-
+    # 重新保存配置文件以确保所有字段正确
     config_path = output_dir / "tokenizer_config.json"
+    config_to_save = _merge_special_tokens_config(dict(template_config))
+    config_to_save["tokenizer_class"] = "PreTrainedTokenizerFast"
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config_to_save, f, indent=2, ensure_ascii=False)
     logger.info(f"配置文件已更新: {config_path}")
@@ -252,8 +281,8 @@ def create_transformers_tokenizer(
 
 
 def validate_tokenizer(
-    tokenizer: PreTrainedTokenizerFast,
-    vocab_size: int,
+        tokenizer: PreTrainedTokenizerFast,
+        vocab_size: int,
 ) -> bool:
     logger.info("开始验证tokenizer...")
     is_valid = True
@@ -264,7 +293,7 @@ def validate_tokenizer(
     else:
         logger.info(f"词表大小正确: {actual_vocab_size}")
     for i, token in enumerate(SPECIAL_TOKENS):
-        expected_id = 32000 + i
+        expected_id = _get_special_token_base_id(vocab_size) + i
         actual_id = tokenizer.convert_tokens_to_ids(token)
         if actual_id != expected_id:
             logger.error(
@@ -313,12 +342,12 @@ def validate_tokenizer(
 
 
 def train_tokenizer(
-    data_dir: Path,
-    template_dir: Path,
-    output_dir: Path,
-    vocab_size: int,
-    min_frequency: int,
-    validate: bool = False,
+        data_dir: Path,
+        template_dir: Path,
+        output_dir: Path,
+        vocab_size: int,
+        min_frequency: int,
+        validate: bool = False,
 ) -> int:
     try:
         logger.info("=" * 60)
@@ -339,7 +368,9 @@ def train_tokenizer(
             data_dir=data_dir,
             vocab_size=vocab_size,
             min_frequency=min_frequency,
+            batch_size=DEFAULT_BATCH_SIZE,
         )
+
         add_special_tokens(tokenizer)
         output_dir.mkdir(parents=True, exist_ok=True)
         transformers_tokenizer = create_transformers_tokenizer(
