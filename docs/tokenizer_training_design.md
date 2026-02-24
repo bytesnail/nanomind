@@ -47,7 +47,23 @@
 | 32003 | `<think>` | 推理开始 | 特殊标记 |
 | 32004 | `</think>` | 推理结束 | 特殊标记 |
 
-**模型配置**:
+**特殊 Token 配置**:
+
+| 配置项 | 内容 |
+|--------|------|
+| `extra_special_tokens` | `[\u003c|im_start|\u003e, \u003c|im_end|\u003e, \u003cthink\u003e, \u003c/think\u003e]` (4个) |
+| `added_tokens` | `[\u003c|endoftext|\u003e, \u003c|im_start|\u003e, \u003c|im_end|\u003e, \u003cthink\u003e, \u003c/think\u003e]` (5个) |
+
+**说明**:
+- `extra_special_tokens` 仅保留对话和推理相关的4个特殊token
+- `added_tokens` 包含5个token，比 `extra_special_tokens` 多一个 `\u003c|endoftext|\u003e` (ID 32000)
+- 已移除模板中原有的视觉/多模态相关token
+
+**模型属性映射**:
+- `bos_token` = `None`
+- `eos_token` = `\u003c|im_end|\u003e` (32002)
+- `pad_token` = `\u003c|endoftext|\u003e` (32000)
+- `unk_token` = `None`
 - `bos_token` = `None`
 - `eos_token` = `<|im_end|>` (32002)
 - `pad_token` = `<|endoftext|>` (32000)
@@ -331,6 +347,13 @@ python scripts/train_tokenizer.py \
 
 4. **构建新的 Tokenizer 配置**
    - 将训练得到的 32K 词表与模板的 normalizer/pretokenizer/decoder 组合
+   - 配置 `added_tokens`: 5 个特殊 token（ID 32000-32004）
+     - `<|endoftext|>` (32000), `<|im_start|>` (32001), `<|im_end|>` (32002)
+     - `<think>` (32003), `</think>` (32004)
+   - 配置 `extra_special_tokens`: 4 个 token（不含 `<|endoftext|>`）
+     - `<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`
+   - 保持与模板一致的 `eos_token`/`pad_token` 等模型属性映射
+   - 将训练得到的 32K 词表与模板的 normalizer/pretokenizer/decoder 组合
    - 添加 5 个特殊 token（ID 32000-32004）到 `added_tokens`
    - 配置 `extra_special_tokens` 仅包含推理相关 token
    - 保持与模板一致的 `eos_token`/`pad_token` 等模型属性映射
@@ -342,7 +365,10 @@ python scripts/train_tokenizer.py \
 **关键说明**:
 
 - 不同于传统的"空白初始化"，本方案**继承完整的 Qwen2Tokenizer 架构**，仅替换：
+  - 不同于传统的"空白初始化"，本方案**继承完整的 Qwen2Tokenizer 架构**，仅替换：
   - `model.vocab`: 从数据新训练的 32K BPE 词表
+  - `added_tokens`: 5 个特殊 token（ID 32000-32004）
+  - `extra_special_tokens`: 4 个 token（`<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`），移除视觉/多模态相关 token
   - `added_tokens`: 精简后的特殊 token 集合
   - `extra_special_tokens`: 移除视觉/多模态相关 token，保留推理相关 token
 
@@ -378,6 +404,24 @@ python scripts/train_tokenizer.py \
 训练时添加 `--validate` 参数，检查：
 
 **基础验证**:
+- 词表大小 = 32005（32000 BPE + 5 特殊token）
+- 特殊 token ID 正确（32000-32004）
+- 编解码一致性
+
+**特殊 Token 配置验证**:
+- `added_tokens` 包含 5 个 token：`<|endoftext|>`, `<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`
+- `extra_special_tokens` 包含 4 个 token：`<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`（不含 `<|endoftext|>`）
+- `extra_special_tokens` 不包含视觉/多模态相关 token
+
+**模板一致性验证**:
+- `normalizer` 配置与模板一致（NFC）
+- `pre_tokenizer` 配置与模板一致（ByteLevel + Regex Split）
+- `decoder` 配置与模板一致（ByteLevel）
+- 模型属性映射与模板一致：
+  - `eos_token` = `<|im_end|>`
+  - `pad_token` = `<|endoftext|>`
+  - `bos_token` = `None`
+  - `unk_token` = `None`
 - 词表大小 = 32005（32000 BPE + 5 特殊token）
 - 特殊 token ID 正确（32000-32004）
 - 编解码一致性
@@ -419,7 +463,29 @@ assert tokenizer.pad_token == template.pad_token, "pad_token 应与模板一致"
 assert tokenizer.bos_token == template.bos_token, "bos_token 应与模板一致"
 assert tokenizer.unk_token == template.unk_token, "unk_token 应与模板一致"
 
-# 3. 验证 extra_special_tokens（应仅包含推理相关token）
+# 3. 验证 added_tokens 和 extra_special_tokens
+with open("output/tokenizer_32k/tokenizer.json") as f:
+    tokenizer_json = json.load(f)
+with open("output/tokenizer_32k/tokenizer_config.json") as f:
+    config = json.load(f)
+
+# 验证 added_tokens (5个)
+expected_added = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
+actual_added = [t["content"] for t in tokenizer_json.get("added_tokens", [])]
+assert set(actual_added) == set(expected_added), f"added_tokens 应为 {expected_added}, 实际是 {actual_added}"
+print(f"✓ added_tokens: {actual_added}")
+
+# 验证 extra_special_tokens (4个，不含<|endoftext|>)
+expected_special = ["<|im_start|>", "<|im_end|>", "<think>", "</think>"]
+actual_special = config.get("extra_special_tokens", [])
+assert set(actual_special) == set(expected_special), f"extra_special_tokens 应为 {expected_special}, 实际是 {actual_special}"
+print(f"✓ extra_special_tokens: {actual_special}")
+
+# 检查没有视觉/多模态相关的token
+vision_tokens = ["<|vision_start|>", "<|vision_end|>", "<|vision_pad|>", 
+                 "<|image_pad|>", "<|video_pad|>"]
+for vt in vision_tokens:
+    assert vt not in actual_special, f"extra_special_tokens 不应包含视觉token: {vt}"
 with open("output/tokenizer_32k/tokenizer_config.json") as f:
     config = json.load(f)
     
@@ -464,11 +530,14 @@ output/tokenizer_32k/
 
 | 文件 | 来源 | 说明 |
 |------|------|------|
-| `tokenizer.json` | 训练生成 + 模板配置 | 包含：①新训练的32K BPE词表 ②从模板继承的normalizer/pretokenizer/decoder/post_processor ③5个特殊token的added_tokens配置 |
-| `tokenizer_config.json` | 训练生成 | 包含：`extra_special_tokens`（仅推理相关）、`eos_token`/`pad_token`等模型属性映射、其他元配置 |
+| `tokenizer.json` | 训练生成 + 模板配置 | 包含：①新训练的32K BPE词表 ②从模板继承的normalizer/pretokenizer/decoder/post_processor ③`added_tokens`：5个特殊token（`\u003c|endoftext|\u003e`, `\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`） |
+| `tokenizer_config.json` | 训练生成 | 包含：`extra_special_tokens`（4个：不含`\u003c|endoftext|\u003e`，仅`\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`）、`eos_token`/`pad_token`等模型属性映射 |
 | `chat_template.jinja` | 模板复制 | 从 `output/qwen3_next_tokenizer/` 原样复制，保持对话格式兼容 |
 
 **与模板的差异**:
+- `tokenizer.json` 中的 `model.vocab`：模板原始词表 → 新训练的32K词表
+- `tokenizer.json` 中的 `added_tokens`：模板原始特殊token → 5个新特殊token（`\u003c|endoftext|\u003e`, `\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`）
+- `tokenizer_config.json` 中的 `extra_special_tokens`：模板完整列表 → 4个token（`\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`，不含`\u003c|endoftext|\u003e`，移除视觉/多模态相关token）
 - `tokenizer.json` 中的 `model.vocab`：模板原始词表 → 新训练的32K词表
 - `tokenizer.json` 中的 `added_tokens`：模板原始特殊token → 新的5个特殊token
 - `tokenizer_config.json` 中的 `extra_special_tokens`：模板完整列表 → 精简后的推理相关token
@@ -514,7 +583,7 @@ pyarrow>=15.0.0
 | `extract_template_config()` | 提取模板的 normalizer/pretokenizer/decoder 配置 |
 | `train_bpe_vocab()` | 在采样数据上训练 32K BPE 词表 |
 | `build_tokenizer_from_template()` | 将新词表与模板配置组合，创建完整 tokenizer |
-| `configure_special_tokens()` | 配置 5 个特殊 token 和 extra_special_tokens |
+| `configure_special_tokens()` | 配置特殊 token：`added_tokens`（5个）和 `extra_special_tokens`（4个，不含`<|endoftext|>`） |
 | `verify_template_consistency()` | 验证输出与模板的一致性（除词表外） |
 | `main()` | CLI 入口，支持 --template-dir, --vocab-size, --validate 等参数 |
 ---
@@ -551,7 +620,18 @@ pyarrow>=15.0.0
 | 推理 | `<think>` | 151667 | 思考开始 |
 | 推理 | `</think>` | 151668 | 思考结束 |
 
-**训练后的特殊 Token（本 tokenizer）**:
+**特殊 Token 配置对比**:
+
+| 配置项 | 模板 (Qwen3-Next) | 训练后 (本 tokenizer) |
+|--------|-------------------|----------------------|
+| `added_tokens` | 26个（含视觉、FIM、工具、推理等） | 5个：`\u003c|endoftext|\u003e`, `\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e` |
+| `extra_special_tokens` | 12个（含视觉、多模态） | 4个：`\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`（不含`\u003c|endoftext|\u003e`） |
+
+**说明**:
+- `extra_special_tokens` 是 `added_tokens` 的子集（不包含`\u003c|endoftext|\u003e`）
+- 已移除：视觉相关（`\u003c|vision_*|\u003e`, `\u003c|image_pad|\u003e`, `\u003c|video_pad|\u003e`）、对象引用（`\u003c|object_ref_*|\u003e`, `\u003c|box_*|\u003e`, `\u003c|quad_*|\u003e`）、FIM（`\u003c|fim_*|\u003e`）、工具调用（`\u003ctool_call\u003e`）
+
+**如需扩展**: 添加视觉/多模态支持时，可从模板恢复相应 token 并增加 `vocab_size`。
 
 | ID | Token | 用途 | 来源 |
 |----|-------|------|------|
