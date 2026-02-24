@@ -50,7 +50,6 @@ DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
 DEFAULT_OUTPUT_DIR = Path("output/tokenizer_32k")
 DEFAULT_VOCAB_SIZE = 32005
 DEFAULT_MIN_FREQUENCY = 2
-BPE_VOCAB_SIZE = 32000  # 实际 BPE 词表大小 (不含特殊 token)
 
 EXTRA_SPECIAL_TOKENS = [
     "<|im_start|>",
@@ -60,6 +59,9 @@ EXTRA_SPECIAL_TOKENS = [
 ]
 
 SPECIAL_TOKENS = ["<|endoftext|>"] + EXTRA_SPECIAL_TOKENS  # ID 32000-32004
+
+# 实际 BPE 词表大小 (不含特殊 token)
+BPE_VOCAB_SIZE = DEFAULT_VOCAB_SIZE - len(SPECIAL_TOKENS)
 
 
 VISION_TOKENS = [
