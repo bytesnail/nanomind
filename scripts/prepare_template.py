@@ -12,9 +12,9 @@
 
 输出:
     output/qwen3_next_tokenizer/
+    ├── chat_template.jinja     # 对话模板
     ├── tokenizer.json          # 词表与处理配置
-    ├── tokenizer_config.json   # Tokenizer 配置
-    └── special_tokens_map.json # 特殊 token 映射
+    └── tokenizer_config.json   # Tokenizer 配置
 """
 
 import argparse
