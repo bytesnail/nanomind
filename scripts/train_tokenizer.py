@@ -140,10 +140,10 @@ def extract_template_config(template_dir: Path) -> dict[str, Any]:
         "model_type": tokenizer_data.get("model", {}).get("type"),
     }
 
-    special_tokens_map_path = template_dir / "special_tokens_map.json"
-    if special_tokens_map_path.exists():
-        with open(special_tokens_map_path, encoding="utf-8") as f:
-            config["special_tokens_map"] = json.load(f)
+    tokenizer_config_path = template_dir / "tokenizer_config.json"
+    if tokenizer_config_path.exists():
+        with open(tokenizer_config_path, encoding="utf-8") as f:
+            config["tokenizer_config"] = json.load(f)
 
     logger.info(f"提取配置项: {list(config.keys())}")
     return config
