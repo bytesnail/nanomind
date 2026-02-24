@@ -51,19 +51,15 @@
 
 | 配置项 | 内容 |
 |--------|------|
-| `extra_special_tokens` | `[\u003c|im_start|\u003e, \u003c|im_end|\u003e, \u003cthink\u003e, \u003c/think\u003e]` (4个) |
-| `added_tokens` | `[\u003c|endoftext|\u003e, \u003c|im_start|\u003e, \u003c|im_end|\u003e, \u003cthink\u003e, \u003c/think\u003e]` (5个) |
+| `extra_special_tokens` | `[<\|im_start\|>, <\|im_end\|>, <think>, </think>]` (4个) |
+| `added_tokens` | `[<\|endoftext\|>, <\|im_start\|>, <\|im_end\|>, <think>, </think>]` (5个) |
 
 **说明**:
 - `extra_special_tokens` 仅保留对话和推理相关的4个特殊token
-- `added_tokens` 包含5个token，比 `extra_special_tokens` 多一个 `\u003c|endoftext|\u003e` (ID 32000)
+- `added_tokens` 包含5个token，比 `extra_special_tokens` 多一个 `<|endoftext|>` (ID 32000)
 - 已移除模板中原有的视觉/多模态相关token
 
 **模型属性映射**:
-- `bos_token` = `None`
-- `eos_token` = `\u003c|im_end|\u003e` (32002)
-- `pad_token` = `\u003c|endoftext|\u003e` (32000)
-- `unk_token` = `None`
 - `bos_token` = `None`
 - `eos_token` = `<|im_end|>` (32002)
 - `pad_token` = `<|endoftext|>` (32000)
@@ -379,7 +375,7 @@ python scripts/train_tokenizer.py \
   | `pre_tokenizer` | 模板 | ByteLevel + Regex Split |
   | `post_processor` | 模板 | ByteLevel 后处理 |
   | `decoder` | 模板 | ByteLevel 解码器 |
-  | 模型属性映射 | 模板 | `eos_token`→`<\|im_end\|>`, `pad_token`→`<\|endoftext\|>` |
+  | 模型属性映射 | 模板 | `eos_token`→`<|im_end|>`, `pad_token`→`<|endoftext|>` |
   | `model_max_length` | 模板 | 1010000 |
   | `clean_up_tokenization_spaces` | 模板 | false |
 
@@ -530,14 +526,14 @@ output/tokenizer_32k/
 
 | 文件 | 来源 | 说明 |
 |------|------|------|
-| `tokenizer.json` | 训练生成 + 模板配置 | 包含：①新训练的32K BPE词表 ②从模板继承的normalizer/pretokenizer/decoder/post_processor ③`added_tokens`：5个特殊token（`\u003c|endoftext|\u003e`, `\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`） |
-| `tokenizer_config.json` | 训练生成 | 包含：`extra_special_tokens`（4个：不含`\u003c|endoftext|\u003e`，仅`\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`）、`eos_token`/`pad_token`等模型属性映射 |
+| `tokenizer.json` | 训练生成 + 模板配置 | 包含：①新训练的32K BPE词表 ②从模板继承的normalizer/pretokenizer/decoder/post_processor ③`added_tokens`：5个特殊token（`<\|endoftext\|>`, `<\|im_start\|>`, `<\|im_end\|>`, `<think>`, `</think>`） |
+| `tokenizer_config.json` | 训练生成 | 包含：`extra_special_tokens`（4个：不含`<\|endoftext\|>`，仅`<\|im_start\|>`, `<\|im_end\|>`, `<think>`, `</think>`）、`eos_token`/`pad_token`等模型属性映射 |
 | `chat_template.jinja` | 模板复制 | 从 `output/qwen3_next_tokenizer/` 原样复制，保持对话格式兼容 |
 
 **与模板的差异**:
 - `tokenizer.json` 中的 `model.vocab`：模板原始词表 → 新训练的32K词表
-- `tokenizer.json` 中的 `added_tokens`：模板原始特殊token → 5个新特殊token（`\u003c|endoftext|\u003e`, `\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`）
-- `tokenizer_config.json` 中的 `extra_special_tokens`：模板完整列表 → 4个token（`\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`，不含`\u003c|endoftext|\u003e`，移除视觉/多模态相关token）
+- `tokenizer.json` 中的 `added_tokens`：模板原始特殊token → 5个新特殊token（`<|endoftext|>`, `<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`）
+- `tokenizer_config.json` 中的 `extra_special_tokens`：模板完整列表 → 4个token（`<|im_start|>`, `<|im_end|>`, `<think>`, `</think>`，不含`<|endoftext|>`，移除视觉/多模态相关token）
 - `tokenizer.json` 中的 `model.vocab`：模板原始词表 → 新训练的32K词表
 - `tokenizer.json` 中的 `added_tokens`：模板原始特殊token → 新的5个特殊token
 - `tokenizer_config.json` 中的 `extra_special_tokens`：模板完整列表 → 精简后的推理相关token
@@ -583,7 +579,7 @@ pyarrow>=15.0.0
 | `extract_template_config()` | 提取模板的 normalizer/pretokenizer/decoder 配置 |
 | `train_bpe_vocab()` | 在采样数据上训练 32K BPE 词表 |
 | `build_tokenizer_from_template()` | 将新词表与模板配置组合，创建完整 tokenizer |
-| `configure_special_tokens()` | 配置特殊 token：`added_tokens`（5个）和 `extra_special_tokens`（4个，不含`<|endoftext|>`） |
+| `configure_special_tokens()` | 配置特殊 token：`added_tokens`（5个）和 `extra_special_tokens`（4个，不含`<\|endoftext\|>`） |
 | `verify_template_consistency()` | 验证输出与模板的一致性（除词表外） |
 | `main()` | CLI 入口，支持 --template-dir, --vocab-size, --validate 等参数 |
 ---
@@ -598,23 +594,23 @@ pyarrow>=15.0.0
 
 | 类型 | Token | ID | 说明 |
 |------|-------|-----|------|
-| 基础 | `<|endoftext|>` | 151643 | 文本结束 / pad token |
-| 对话 | `<|im_start|>` | 151644 | 对话开始 |
-| 对话 | `<|im_end|>` | 151645 | 对话结束 / eos token |
-| 视觉 | `<|object_ref_start|>` | 151646 | 对象引用开始 |
-| 视觉 | `<|object_ref_end|>` | 151647 | 对象引用结束 |
-| 视觉 | `<|box_start|>` | 151648 | 边界框开始 |
-| 视觉 | `<|box_end|>` | 151649 | 边界框结束 |
-| 视觉 | `<|quad_start|>` | 151650 | 四边形开始 |
-| 视觉 | `<|quad_end|>` | 151651 | 四边形结束 |
-| 视觉 | `<|vision_start|>` | 151652 | 视觉输入开始 |
-| 视觉 | `<|vision_end|>` | 151653 | 视觉输入结束 |
-| 视觉 | `<|vision_pad|>` | 151654 | 视觉填充 |
-| 视觉 | `<|image_pad|>` | 151655 | 图像填充 |
-| 视觉 | `<|video_pad|>` | 151656 | 视频填充 |
-| FIM | `<|fim_prefix|>` | 151659 | 代码填充前缀 |
-| FIM | `<|fim_middle|>` | 151660 | 代码填充中间 |
-| FIM | `<|fim_suffix|>` | 151661 | 代码填充后缀 |
+| 基础 | `<\|endoftext\|>` | 151643 | 文本结束 / pad token |
+| 对话 | `<\|im_start\|>` | 151644 | 对话开始 |
+| 对话 | `<\|im_end\|>` | 151645 | 对话结束 / eos token |
+| 视觉 | `<\|object_ref_start\|>` | 151646 | 对象引用开始 |
+| 视觉 | `<\|object_ref_end\|>` | 151647 | 对象引用结束 |
+| 视觉 | `<\|box_start\|>` | 151648 | 边界框开始 |
+| 视觉 | `<\|box_end\|>` | 151649 | 边界框结束 |
+| 视觉 | `<\|quad_start\|>` | 151650 | 四边形开始 |
+| 视觉 | `<\|quad_end\|>` | 151651 | 四边形结束 |
+| 视觉 | `<\|vision_start\|>` | 151652 | 视觉输入开始 |
+| 视觉 | `<\|vision_end\|>` | 151653 | 视觉输入结束 |
+| 视觉 | `<\|vision_pad\|>` | 151654 | 视觉填充 |
+| 视觉 | `<\|image_pad\|>` | 151655 | 图像填充 |
+| 视觉 | `<\|video_pad\|>` | 151656 | 视频填充 |
+| FIM | `<\|fim_prefix\|>` | 151659 | 代码填充前缀 |
+| FIM | `<\|fim_middle\|>` | 151660 | 代码填充中间 |
+| FIM | `<\|fim_suffix\|>` | 151661 | 代码填充后缀 |
 | 工具 | `<tool_call>` | 151657 | 工具调用开始 |
 | 工具 | `</tool_call>` | 151658 | 工具调用结束 |
 | 推理 | `<think>` | 151667 | 思考开始 |
@@ -624,20 +620,20 @@ pyarrow>=15.0.0
 
 | 配置项 | 模板 (Qwen3-Next) | 训练后 (本 tokenizer) |
 |--------|-------------------|----------------------|
-| `added_tokens` | 26个（含视觉、FIM、工具、推理等） | 5个：`\u003c|endoftext|\u003e`, `\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e` |
-| `extra_special_tokens` | 12个（含视觉、多模态） | 4个：`\u003c|im_start|\u003e`, `\u003c|im_end|\u003e`, `\u003cthink\u003e`, `\u003c/think\u003e`（不含`\u003c|endoftext|\u003e`） |
+| `added_tokens` | 26个（含视觉、FIM、工具、推理等） | 5个：`<\|endoftext\|>`, `<\|im_start\|>`, `<\|im_end\|>`, `<think>`, `</think>` |
+| `extra_special_tokens` | 12个（含视觉、多模态） | 4个：`<\|im_start\|>`, `<\|im_end\|>`, `<think>`, `</think>`（不含`<\|endoftext\|>`） |
 
 **说明**:
-- `extra_special_tokens` 是 `added_tokens` 的子集（不包含`\u003c|endoftext|\u003e`）
-- 已移除：视觉相关（`\u003c|vision_*|\u003e`, `\u003c|image_pad|\u003e`, `\u003c|video_pad|\u003e`）、对象引用（`\u003c|object_ref_*|\u003e`, `\u003c|box_*|\u003e`, `\u003c|quad_*|\u003e`）、FIM（`\u003c|fim_*|\u003e`）、工具调用（`\u003ctool_call\u003e`）
+- `extra_special_tokens` 是 `added_tokens` 的子集（不包含`<|endoftext|>`）
+- 已移除：视觉相关（`<|vision_*|>`, `<|image_pad|>`, `<|video_pad|>`）、对象引用（`<|object_ref_*|>`, `<|box_*|>`, `<|quad_*|>`）、FIM（`<|fim_*|>`）、工具调用（`<tool_call>`）
 
 **如需扩展**: 添加视觉/多模态支持时，可从模板恢复相应 token 并增加 `vocab_size`。
 
 | ID | Token | 用途 | 来源 |
 |----|-------|------|------|
-| 32000 | `<|endoftext|>` | 文本结束 / pad token | 模板继承 |
-| 32001 | `<|im_start|>` | 对话开始 | 模板继承 |
-| 32002 | `<|im_end|>` | 对话结束 / eos token | 模板继承 |
+| 32000 | `<\|endoftext\|>` | 文本结束 / pad token | 模板继承 |
+| 32001 | `<\|im_start\|>` | 对话开始 | 模板继承 |
+| 32002 | `<\|im_end\|>` | 对话结束 / eos token | 模板继承 |
 | 32003 | `<think>` | 推理开始 | 新增 |
 | 32004 | `</think>` | 推理结束 | 新增 |
 
