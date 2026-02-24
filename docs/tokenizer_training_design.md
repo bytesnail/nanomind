@@ -451,14 +451,27 @@ print("✓ 所有验证通过！")
 
 ### 4.3 输出文件
 
+**输出目录结构**（与 `output/qwen3_next_tokenizer/` 模板完全一致）：
+
 ```
 output/tokenizer_32k/
-├── tokenizer.json              # 词表与合并规则
-├── tokenizer_config.json       # Tokenizer配置
-├── special_tokens_map.json     # 特殊token映射
-└── vocab.txt                   # 可读词汇表
+├── tokenizer.json              # 词表与合并规则（包含新的32K BPE词表）
+├── tokenizer_config.json       # Tokenizer配置（特殊token映射等）
+└── chat_template.jinja         # 对话模板（从模板复制）
 ```
 
+**文件说明**:
+
+| 文件 | 来源 | 说明 |
+|------|------|------|
+| `tokenizer.json` | 训练生成 + 模板配置 | 包含：①新训练的32K BPE词表 ②从模板继承的normalizer/pretokenizer/decoder/post_processor ③5个特殊token的added_tokens配置 |
+| `tokenizer_config.json` | 训练生成 | 包含：`extra_special_tokens`（仅推理相关）、`eos_token`/`pad_token`等模型属性映射、其他元配置 |
+| `chat_template.jinja` | 模板复制 | 从 `output/qwen3_next_tokenizer/` 原样复制，保持对话格式兼容 |
+
+**与模板的差异**:
+- `tokenizer.json` 中的 `model.vocab`：模板原始词表 → 新训练的32K词表
+- `tokenizer.json` 中的 `added_tokens`：模板原始特殊token → 新的5个特殊token
+- `tokenizer_config.json` 中的 `extra_special_tokens`：模板完整列表 → 精简后的推理相关token
 ---
 
 ## 5. 实现清单
