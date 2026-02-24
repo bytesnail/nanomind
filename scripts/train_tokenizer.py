@@ -8,15 +8,12 @@
 输出:
     output/tokenizer_32k/
     ├── tokenizer.json
-    ├── tokenizer_config.json
-    ├── special_tokens_map.json
-    └── vocab.txt
+    └── tokenizer_config.json
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from collections.abc import Iterator
@@ -176,9 +173,6 @@ def create_transformers_tokenizer(
         **SPECIAL_TOKENS_MAP,
     )
     transformers_tokenizer.save_pretrained(output_dir)
-    special_tokens_map_path = output_dir / "special_tokens_map.json"
-    with open(special_tokens_map_path, "w", encoding="utf-8") as f:
-        json.dump(SPECIAL_TOKENS_MAP, f, indent=2, ensure_ascii=False)
     logger.info(f"Tokenizer已保存到: {output_dir}")
     return transformers_tokenizer
 
@@ -256,8 +250,6 @@ def train_tokenizer(
         add_special_tokens(tokenizer)
         output_dir.mkdir(parents=True, exist_ok=True)
         transformers_tokenizer = create_transformers_tokenizer(tokenizer, output_dir)
-        vocab_path = output_dir / "vocab.txt"
-        save_vocab_text(tokenizer, vocab_path)
         if validate:
             logger.info("")
             is_valid = validate_tokenizer(transformers_tokenizer, vocab_size)
