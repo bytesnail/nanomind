@@ -260,7 +260,10 @@ def train_tokenizer(
         save_vocab_text(tokenizer, vocab_path)
         if validate:
             logger.info("")
-            validate_tokenizer(transformers_tokenizer, vocab_size)
+            is_valid = validate_tokenizer(transformers_tokenizer, vocab_size)
+            if not is_valid:
+                logger.error("Tokenizer 验证失败")
+                return 1
         logger.info("")
         logger.info("=" * 60)
         logger.info("训练完成")
@@ -325,7 +328,7 @@ def main() -> int:
         "-v",
         type=int,
         default=DEFAULT_VOCAB_SIZE,
-        help=f"目标词表大小 (默认: {DEFAULT_VOCAB_SIZE})",
+        help=f"目标总词表大小 (默认: {DEFAULT_VOCAB_SIZE})",
     )
     parser.add_argument(
         "--min-frequency",
