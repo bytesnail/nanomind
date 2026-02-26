@@ -112,12 +112,12 @@ def create_text_iterator(
 ) -> Iterator[str]:
     """创建文本迭代器，流式读取采样数据。
 
-    采用生成器模式，避免一次性加载所有数据到内存。
-    每处理 batch_size 个文档后触发垃圾回收。
+    采用生成器模式，使用 Parquet 分批次读取，避免一次性加载所有数据到内存。
+    每处理完一个 batch 后触发垃圾回收。
 
     Args:
         data_dir: 采样数据目录
-        batch_size: 批次大小，每处理这么多文档后触发 GC
+        batch_size: 批次大小，控制每次从 Parquet 读取的行数
 
     Yields:
         文档文本内容
@@ -134,20 +134,25 @@ def create_text_iterator(
     total_yielded = 0
 
     for file_path in files:
-        logger.debug(f"读取文件: {file_path}")
+        logger.debug(f"流式读取文件: {file_path}")
 
         try:
-            table = pq.read_table(file_path, columns=["text"])
-            texts = table["text"].to_pylist()
+            # 使用 ParquetFile 进行真正的流式读取
+            parquet_file = pq.ParquetFile(file_path)
 
-            for text in texts:
-                if text and isinstance(text, str):
-                    yield text
-                    total_yielded += 1
+            for batch in parquet_file.iter_batches(
+                columns=["text"], batch_size=batch_size
+            ):
+                texts = batch["text"].to_pylist()
 
-                    if total_yielded % batch_size == 0:
-                        gc.collect()
-                        logger.debug(f"已处理 {total_yielded} 个文档")
+                for text in texts:
+                    if text and isinstance(text, str):
+                        yield text
+                        total_yielded += 1
+
+                # 每处理完一个 batch 触发 GC
+                gc.collect()
+                logger.debug(f"已处理 {total_yielded} 个文档")
 
         except Exception as e:
             logger.warning(f"读取文件失败 {file_path}: {e}")
