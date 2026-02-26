@@ -6,9 +6,9 @@
 保存到本地作为后续训练的模板（复制 pretokenizer/normalizer/decoder 配置）。
 
 用法:
-    python scripts/prepare_template.py
-    python scripts/prepare_template.py --output-dir output/qwen3_next_tokenizer_origin
-    python scripts/prepare_template.py --model Qwen/Qwen3-Next-80B-A3B-Instruct
+    python scripts/prepare_tokenizer_template.py
+    python scripts/prepare_tokenizer_template.py --output-dir output/qwen3_next_tokenizer_origin
+    python scripts/prepare_tokenizer_template.py --model Qwen/Qwen3-Next-80B-A3B-Instruct
 
 输出:
     output/qwen3_next_tokenizer_origin/
@@ -96,7 +96,7 @@ def _create_modified_tokenizer_json(tokenizer_data: dict) -> dict:
     return tokenizer_data
 
 
-def prepare_template(model_name: str, output_dir: Path, modified_dir: Path) -> None:
+def prepare_tokenizer_template(model_name: str, output_dir: Path, modified_dir: Path) -> None:
     """从指定模型下载并保存 tokenizer 模板。
 
     Args:
@@ -180,13 +180,13 @@ def main() -> int:
         epilog="""
 示例:
   # 使用默认配置
-  python scripts/prepare_template.py
+  python scripts/prepare_tokenizer_template.py
 
   # 指定输出目录
-  python scripts/prepare_template.py --output-dir /path/to/output
+  python scripts/prepare_tokenizer_template.py --output-dir /path/to/output
 
   # 使用不同的基础模型
-  python scripts/prepare_template.py --model Qwen/Qwen3-Next-0.6B
+  python scripts/prepare_tokenizer_template.py --model Qwen/Qwen3-Next-0.6B
         """,
     )
     parser.add_argument(
@@ -213,7 +213,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        prepare_template(args.model, args.output_dir, args.modified_dir)
+        prepare_tokenizer_template(args.model, args.output_dir, args.modified_dir)
         logger.info("模板准备完成！")
         return 0
     except Exception as e:
