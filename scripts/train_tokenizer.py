@@ -280,7 +280,7 @@ def _validate_extra_special_tokens(tokenizer_dir: Path) -> bool:
     """验证 extra_special_tokens 包含正确的 4 个 token。"""
     config = _load_tokenizer_config(tokenizer_dir)
 
-    expected_special = {"<|im_start|>", "<|im_end|>", "<think>", "</think>"}
+    expected_special = set(SPECIAL_TOKENS[1:])  # 去掉第一个元素 <|endoftext|>
     actual_special = set(config.get("extra_special_tokens", []))
 
     if actual_special != expected_special:
@@ -441,17 +441,17 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 使用默认配置
+  # 使用默认配置(跳过验证)
   python scripts/train_tokenizer.py
+
+  # 使用默认配置(带验证)
+  python scripts/train_tokenizer.py --validate
 
   # 指定数据目录和输出目录
   python scripts/train_tokenizer.py --data-dir /path/to/data --output-dir /path/to/output
 
   # 自定义词表大小和批次大小
   python scripts/train_tokenizer.py --vocab-size 32005 --batch-size 5000
-
-  # 跳过验证
-  python scripts/train_tokenizer.py --no-validate
         """,
     )
 
