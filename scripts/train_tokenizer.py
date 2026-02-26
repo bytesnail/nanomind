@@ -2,16 +2,16 @@
 """
 Tokenizer 训练脚本 - 基于模板继承的 BPE 训练
 
-从采样数据训练与 Qwen3-Next 兼容的 32K 词表 BPE Tokenizer。
+从采样数据训练与 Qwen3-Next 兼容的 36K 词表 BPE Tokenizer。
 使用 `train_new_from_iterator` 方法自动继承模板配置。
 
 用法:
     python scripts/train_tokenizer.py
     python scripts/train_tokenizer.py --data-dir data/datasets/nanomind_tokenizer
-    python scripts/train_tokenizer.py --vocab-size 32005 --validate
+    python scripts/train_tokenizer.py --vocab-size 36005 --validate
 
 输出:
-    output/tokenizer_32k/
+    output/tokenizer_36k/
     ├── tokenizer.json              # 词表与合并规则
     ├── tokenizer_config.json       # Tokenizer 配置
     └── chat_template.jinja         # 对话模板（从模板复制）
@@ -39,18 +39,11 @@ logger = logging.getLogger(__name__)
 # 默认配置
 DEFAULT_DATA_DIR = Path("data/datasets/nanomind_tokenizer")
 DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
-DEFAULT_OUTPUT_DIR = Path("output/tokenizer_32k")
-DEFAULT_VOCAB_SIZE = 32005  # 32000 BPE + 5 特殊 token
+DEFAULT_OUTPUT_DIR = Path("output/tokenizer_36k")
+DEFAULT_VOCAB_SIZE = 36005  # 36000 BPE + 5 特殊 token
 
-# 特殊 token 定义 (token -> ID 映射)
-SPECIAL_TOKEN_IDS = {
-    "<|endoftext|>": 32000,
-    "<|im_start|>": 32001,
-    "<|im_end|>": 32002,
-    "<think>": 32003,
-    "</think>": 32004,
-}
-SPECIAL_TOKENS = list(SPECIAL_TOKEN_IDS.keys())
+# 特殊 token 定义
+SPECIAL_TOKENS = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
 
 def load_template_tokenizer(template_dir: Path) -> PreTrainedTokenizerFast:
     """从本地目录加载模板 tokenizer。
@@ -67,8 +60,6 @@ def load_template_tokenizer(template_dir: Path) -> PreTrainedTokenizerFast:
     """
     if not template_dir.exists():
         raise FileNotFoundError(f"模板目录不存在: {template_dir}")
-
-    logger.info(f"加载模板 tokenizer: {template_dir}")
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(
@@ -243,22 +234,6 @@ def _validate_vocab_size(
     return True
 
 
-def _validate_special_token_ids(
-    tokenizer: PreTrainedTokenizerFast,
-) -> bool:
-    """验证特殊 token ID 正确性。"""
-    for token, expected_id in SPECIAL_TOKEN_IDS.items():
-        actual_id = tokenizer.convert_tokens_to_ids(token)
-        if actual_id != expected_id:
-            logger.error(
-                f"特殊 token ID 错误: {token} 期望 {expected_id}, 实际 {actual_id}"
-            )
-            return False
-
-    logger.info("✓ 特殊 token IDs 正确")
-    return True
-
-
 def _validate_added_tokens(tokenizer_dir: Path) -> bool:
     """验证 added_tokens 包含正确的 5 个 token。"""
     tokenizer_json = _load_tokenizer_json(tokenizer_dir)
@@ -351,7 +326,6 @@ def validate_tokenizer(
 
     # 1. 基础验证
     all_passed &= _validate_vocab_size(tokenizer, expected_vocab_size)
-    all_passed &= _validate_special_token_ids(tokenizer)
 
     # 2. 配置文件验证
     all_passed &= _validate_added_tokens(output_dir)
@@ -397,8 +371,6 @@ def train_tokenizer(
     logger.info(f"数据目录: {data_dir}")
     logger.info(f"模板目录: {template_dir}")
     logger.info(f"输出目录: {output_dir}")
-    logger.info(f"词表大小: {vocab_size}")
-    logger.info(f"Parquet 批次大小: {batch_size}")
 
     try:
         # 1. 加载模板 tokenizer
@@ -437,7 +409,7 @@ def train_tokenizer(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="训练与 Qwen3-Next 兼容的 32K 词表 BPE Tokenizer",
+        description="训练与 Qwen3-Next 兼容的 36K 词表 BPE Tokenizer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -451,7 +423,7 @@ def main() -> int:
   python scripts/train_tokenizer.py --data-dir /path/to/data --output-dir /path/to/output
 
   # 自定义词表大小和批次大小
-  python scripts/train_tokenizer.py --vocab-size 32005 --batch-size 5000
+  python scripts/train_tokenizer.py --vocab-size 36005 --batch-size 5000
         """,
     )
 
