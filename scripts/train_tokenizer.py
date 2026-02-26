@@ -165,6 +165,7 @@ def train_tokenizer_with_iterator(
     template_tokenizer: PreTrainedTokenizerFast,
     data_dir: Path,
     vocab_size: int,
+    batch_size: int = 10000,
 ) -> PreTrainedTokenizerFast:
     """使用 `train_new_from_iterator` 训练新 tokenizer。
 
@@ -175,15 +176,17 @@ def train_tokenizer_with_iterator(
         template_tokenizer: 模板 tokenizer
         data_dir: 训练数据目录
         vocab_size: 目标词表大小（包含特殊 token）
+        batch_size: Parquet 读取批次大小
 
     Returns:
         训练完成的新 tokenizer
     """
     logger.info(f"开始训练 tokenizer (vocab_size={vocab_size})")
     logger.info(f"特殊 tokens: {SPECIAL_TOKENS}")
+    logger.info(f"Parquet 批次大小: {batch_size}")
 
     # 创建文本迭代器
-    text_iterator = create_text_iterator(data_dir)
+    text_iterator = create_text_iterator(data_dir, batch_size=batch_size)
 
     # 使用 train_new_from_iterator 训练
     # 自动继承模板的所有配置
@@ -526,6 +529,7 @@ def train_tokenizer(
     template_dir: Path,
     output_dir: Path,
     vocab_size: int,
+    batch_size: int = 10000,
     validate: bool = True,
 ) -> int:
     """主函数：训练 tokenizer。
@@ -535,6 +539,7 @@ def train_tokenizer(
         template_dir: 模板 tokenizer 目录
         output_dir: 输出目录
         vocab_size: 目标词表大小
+        batch_size: Parquet 读取批次大小
         validate: 是否执行验证
 
     Returns:
@@ -547,6 +552,7 @@ def train_tokenizer(
     logger.info(f"模板目录: {template_dir}")
     logger.info(f"输出目录: {output_dir}")
     logger.info(f"词表大小: {vocab_size}")
+    logger.info(f"Parquet 批次大小: {batch_size}")
 
     try:
         # 1. 加载模板 tokenizer
@@ -557,6 +563,7 @@ def train_tokenizer(
             template_tokenizer=template_tokenizer,
             data_dir=data_dir,
             vocab_size=vocab_size,
+            batch_size=batch_size,
         )
 
         # 3. 配置特殊 token 映射
@@ -598,8 +605,8 @@ def main() -> int:
   # 指定数据目录和输出目录
   python scripts/train_tokenizer.py --data-dir /path/to/data --output-dir /path/to/output
 
-  # 自定义词表大小
-  python scripts/train_tokenizer.py --vocab-size 32005
+  # 自定义词表大小和批次大小
+  python scripts/train_tokenizer.py --vocab-size 32005 --batch-size 5000
 
   # 跳过验证
   python scripts/train_tokenizer.py --no-validate
@@ -635,6 +642,13 @@ def main() -> int:
         help=f"目标词表大小 (默认: {DEFAULT_VOCAB_SIZE})",
     )
     parser.add_argument(
+        "--batch-size",
+        "-b",
+        type=int,
+        default=10000,
+        help="Parquet 读取批次大小 (默认: 10000)",
+    )
+    parser.add_argument(
         "--validate",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -648,6 +662,7 @@ def main() -> int:
         template_dir=args.template_dir,
         output_dir=args.output_dir,
         vocab_size=args.vocab_size,
+        batch_size=args.batch_size,
         validate=args.validate,
     )
 
