@@ -23,7 +23,6 @@ import argparse
 import gc
 import json
 import logging
-import shutil
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -193,44 +192,21 @@ def train_tokenizer_with_iterator(
     return new_tokenizer
 
 
-def copy_chat_template(template_dir: Path, output_dir: Path) -> None:
-    """从模板目录复制 chat_template.jinja 到输出目录。
-
-    Args:
-        template_dir: 模板目录
-        output_dir: 输出目录
-    """
-    template_file = template_dir / "chat_template.jinja"
-    output_file = output_dir / "chat_template.jinja"
-
-    if template_file.exists():
-        shutil.copy2(template_file, output_file)
-        logger.info("已复制 chat_template.jinja")
-
-    else:
-        logger.warning(f"模板目录中未找到 chat_template.jinja: {template_file}")
-
-
 def save_tokenizer(
     tokenizer: PreTrainedTokenizerFast,
     output_dir: Path,
-    template_dir: Path,
 ) -> None:
     """保存 tokenizer 到输出目录。
 
     Args:
         tokenizer: 训练完成的 tokenizer
         output_dir: 输出目录
-        template_dir: 模板目录（用于复制 chat_template.jinja）
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # 保存 tokenizer
     tokenizer.save_pretrained(output_dir)
     logger.info(f"Tokenizer 已保存到: {output_dir}")
-
-    # 复制 chat_template.jinja
-    copy_chat_template(template_dir, output_dir)
 
     # 列出输出文件
     saved_files = list(output_dir.iterdir())
@@ -437,7 +413,7 @@ def train_tokenizer(
         )
 
         # 3. 保存 tokenizer
-        save_tokenizer(new_tokenizer, output_dir, template_dir)
+        save_tokenizer(new_tokenizer, output_dir)
 
         # 4. 验证（如果启用）
         if validate:
