@@ -7,11 +7,11 @@
 
 用法:
     python scripts/prepare_template.py
-    python scripts/prepare_template.py --output-dir output/qwen3_next_tokenizer
+    python scripts/prepare_template.py --output-dir output/qwen3_next_tokenizer_origin
     python scripts/prepare_template.py --model Qwen/Qwen3-Next-80B-A3B-Instruct
 
 输出:
-    output/qwen3_next_tokenizer/
+    output/qwen3_next_tokenizer_origin/
     ├── chat_template.jinja     # 对话模板
     ├── tokenizer.json          # 词表与处理配置
     └── tokenizer_config.json   # Tokenizer 配置
@@ -30,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "Qwen/Qwen3-Next-80B-A3B-Instruct"
-DEFAULT_OUTPUT_DIR = Path("output/qwen3_next_tokenizer")
+DEFAULT_OUTPUT_DIR = Path("output/qwen3_next_tokenizer_origin")
 
 
 def prepare_template(model_name: str, output_dir: Path) -> None:
