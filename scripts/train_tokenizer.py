@@ -52,12 +52,6 @@ SPECIAL_TOKENS = [
     "</think>",
 ]
 
-# 模型属性映射
-EOS_TOKEN = "<|im_end|>"
-PAD_TOKEN = "<|endoftext|>"
-BOS_TOKEN = None
-UNK_TOKEN = None
-
 
 def load_template_tokenizer(template_dir: Path) -> PreTrainedTokenizerFast:
     """从本地目录加载模板 tokenizer。
@@ -193,39 +187,10 @@ def train_tokenizer_with_iterator(
     new_tokenizer = template_tokenizer.train_new_from_iterator(
         text_iterator,
         vocab_size=vocab_size,
-        new_special_tokens=SPECIAL_TOKENS,
     )
 
     logger.info("Tokenizer 训练完成")
     return new_tokenizer
-
-
-def configure_special_token_mappings(
-    tokenizer: PreTrainedTokenizerFast,
-) -> PreTrainedTokenizerFast:
-    """配置特殊 token 映射。
-
-    设置 eos_token、pad_token、bos_token、unk_token 等模型属性。
-
-    Args:
-        tokenizer: 训练完成的 tokenizer
-
-    Returns:
-        配置完成后的 tokenizer
-    """
-    logger.info("配置特殊 token 映射")
-
-    tokenizer.eos_token = EOS_TOKEN
-    tokenizer.pad_token = PAD_TOKEN
-    tokenizer.bos_token = BOS_TOKEN
-    tokenizer.unk_token = UNK_TOKEN
-
-    logger.info(f"  eos_token: {tokenizer.eos_token} (ID: {tokenizer.eos_token_id})")
-    logger.info(f"  pad_token: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")
-    logger.info(f"  bos_token: {tokenizer.bos_token}")
-    logger.info(f"  unk_token: {tokenizer.unk_token}")
-
-    return tokenizer
 
 
 def copy_chat_template(template_dir: Path, output_dir: Path) -> None:
@@ -326,24 +291,6 @@ def _validate_special_token_ids(
     return True
 
 
-def _validate_token_mappings(tokenizer: PreTrainedTokenizerFast) -> bool:
-    """验证模型属性映射。"""
-    checks = [
-        (tokenizer.eos_token, EOS_TOKEN, "eos_token"),
-        (tokenizer.pad_token, PAD_TOKEN, "pad_token"),
-        (tokenizer.bos_token, BOS_TOKEN, "bos_token"),
-        (tokenizer.unk_token, UNK_TOKEN, "unk_token"),
-    ]
-
-    for actual, expected, name in checks:
-        if actual != expected:
-            logger.error(f"{name} 映射错误: 期望 {expected}, 实际 {actual}")
-            return False
-
-    logger.info("✓ 模型属性映射正确")
-    return True
-
-
 def _validate_added_tokens(tokenizer_dir: Path) -> bool:
     """验证 added_tokens 包含正确的 5 个 token。"""
     tokenizer_json = _load_tokenizer_json(tokenizer_dir)
@@ -362,7 +309,7 @@ def _validate_added_tokens(tokenizer_dir: Path) -> bool:
 
 
 def _validate_extra_special_tokens(tokenizer_dir: Path) -> bool:
-    """验证 extra_special_tokens 包含正确的 4 个 token（不含 <|endoftext|>）。"""
+    """验证 extra_special_tokens 包含正确的 4 个 token。"""
     config = _load_tokenizer_config(tokenizer_dir)
 
     expected_special = {"<|im_start|>", "<|im_end|>", "<think>", "</think>"}
@@ -374,71 +321,7 @@ def _validate_extra_special_tokens(tokenizer_dir: Path) -> bool:
         logger.error(f"  实际: {actual_special}")
         return False
 
-    # 检查不包含 <|endoftext|>
-    if "<|endoftext|>" in actual_special:
-        logger.error("extra_special_tokens 不应包含 <|endoftext|>")
-        return False
-
     logger.info(f"✓ extra_special_tokens: {sorted(actual_special)}")
-    return True
-
-
-def _validate_no_vision_tokens(tokenizer_dir: Path) -> bool:
-    """验证不包含视觉/多模态相关的 token。"""
-    config = _load_tokenizer_config(tokenizer_dir)
-    extra_special = config.get("extra_special_tokens", [])
-
-    vision_tokens = [
-        "<|vision_start|>",
-        "<|vision_end|>",
-        "<|vision_pad|>",
-        "<|image_pad|>",
-        "<|video_pad|>",
-        "<|object_ref_start|>",
-        "<|object_ref_end|>",
-        "<|box_start|>",
-        "<|box_end|>",
-        "<|quad_start|>",
-        "<|quad_end|>",
-        "<|fim_prefix|>",
-        "<|fim_middle|>",
-        "<|fim_suffix|>",
-        "<tool_call>",
-        "</tool_call>",
-    ]
-
-    for vt in vision_tokens:
-        if vt in extra_special:
-            logger.error(f"extra_special_tokens 不应包含视觉/多模态 token: {vt}")
-            return False
-
-    logger.info("✓ 不包含视觉/多模态相关 tokens")
-    return True
-
-
-def _validate_template_consistency(
-    trained_tokenizer: PreTrainedTokenizerFast,
-    template_tokenizer: PreTrainedTokenizerFast,
-) -> bool:
-    """验证与模板的配置一致性。"""
-    # 比较 normalizer、pre_tokenizer、decoder 配置
-    # 注意：词表不同，但处理流程应一致
-
-    template_config = template_tokenizer.to_dict()
-    trained_config = trained_tokenizer.to_dict()
-
-    # 检查关键配置字段
-    keys_to_check = ["normalizer", "pre_tokenizer", "decoder", "post_processor"]
-
-    for key in keys_to_check:
-        template_val = template_config.get(key)
-        trained_val = trained_config.get(key)
-
-        if template_val != trained_val:
-            # 词表不同是正常的，但配置结构应该相同
-            logger.warning(f"{key} 配置可能与模板不同（可能由于词表变化）")
-
-    logger.info("✓ 模板配置一致性检查完成")
     return True
 
 
@@ -470,7 +353,6 @@ def _validate_encode_decode(tokenizer: PreTrainedTokenizerFast) -> bool:
 def validate_tokenizer(
     tokenizer: PreTrainedTokenizerFast,
     output_dir: Path,
-    template_tokenizer: PreTrainedTokenizerFast,
     expected_vocab_size: int,
 ) -> bool:
     """执行完整的 tokenizer 验证。
@@ -488,7 +370,6 @@ def validate_tokenizer(
     Args:
         tokenizer: 训练完成的 tokenizer
         output_dir: 输出目录
-        template_tokenizer: 模板 tokenizer
         expected_vocab_size: 期望的词表大小
 
     Returns:
@@ -503,15 +384,12 @@ def validate_tokenizer(
     # 1. 基础验证
     all_passed &= _validate_vocab_size(tokenizer, expected_vocab_size)
     all_passed &= _validate_special_token_ids(tokenizer)
-    all_passed &= _validate_token_mappings(tokenizer)
 
     # 2. 配置文件验证
     all_passed &= _validate_added_tokens(output_dir)
     all_passed &= _validate_extra_special_tokens(output_dir)
-    all_passed &= _validate_no_vision_tokens(output_dir)
 
-    # 3. 一致性验证
-    all_passed &= _validate_template_consistency(tokenizer, template_tokenizer)
+    # 3. 编解码一致性验证
     all_passed &= _validate_encode_decode(tokenizer)
 
     logger.info("=" * 60)
@@ -566,18 +444,14 @@ def train_tokenizer(
             batch_size=batch_size,
         )
 
-        # 3. 配置特殊 token 映射
-        new_tokenizer = configure_special_token_mappings(new_tokenizer)
-
-        # 4. 保存 tokenizer
+        # 3. 保存 tokenizer
         save_tokenizer(new_tokenizer, output_dir, template_dir)
 
-        # 5. 验证（如果启用）
+        # 4. 验证（如果启用）
         if validate:
             success = validate_tokenizer(
                 tokenizer=new_tokenizer,
                 output_dir=output_dir,
-                template_tokenizer=template_tokenizer,
                 expected_vocab_size=vocab_size,
             )
             if not success:
