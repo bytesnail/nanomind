@@ -108,7 +108,7 @@ def find_parquet_files(data_dir: Path) -> list[Path]:
 
 def create_text_iterator(
     data_dir: Path,
-    batch_size: int = 10000,
+    batch_size: int,
 ) -> Iterator[str]:
     """创建文本迭代器，流式读取采样数据。
 
@@ -165,7 +165,7 @@ def train_tokenizer_with_iterator(
     template_tokenizer: PreTrainedTokenizerFast,
     data_dir: Path,
     vocab_size: int,
-    batch_size: int = 10000,
+    batch_size: int,
 ) -> PreTrainedTokenizerFast:
     """使用 `train_new_from_iterator` 训练新 tokenizer。
 
@@ -529,7 +529,7 @@ def train_tokenizer(
     template_dir: Path,
     output_dir: Path,
     vocab_size: int,
-    batch_size: int = 10000,
+    batch_size: int,
     validate: bool = True,
 ) -> int:
     """主函数：训练 tokenizer。
