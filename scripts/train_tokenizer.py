@@ -43,15 +43,15 @@ DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
 DEFAULT_OUTPUT_DIR = Path("output/tokenizer_32k")
 DEFAULT_VOCAB_SIZE = 32005  # 32000 BPE + 5 特殊 token
 
-# 特殊 token 定义
-SPECIAL_TOKENS = [
-    "<|endoftext|>",
-    "<|im_start|>",
-    "<|im_end|>",
-    "<think>",
-    "</think>",
-]
-
+# 特殊 token 定义 (token -> ID 映射)
+SPECIAL_TOKEN_IDS = {
+    "<|endoftext|>": 32000,
+    "<|im_start|>": 32001,
+    "<|im_end|>": 32002,
+    "<think>": 32003,
+    "</think>": 32004,
+}
+SPECIAL_TOKENS = list(SPECIAL_TOKEN_IDS.keys())
 
 def load_template_tokenizer(template_dir: Path) -> PreTrainedTokenizerFast:
     """从本地目录加载模板 tokenizer。
@@ -271,15 +271,7 @@ def _validate_special_token_ids(
     tokenizer: PreTrainedTokenizerFast,
 ) -> bool:
     """验证特殊 token ID 正确性。"""
-    expected_ids = {
-        "<|endoftext|>": 32000,
-        "<|im_start|>": 32001,
-        "<|im_end|>": 32002,
-        "<think>": 32003,
-        "</think>": 32004,
-    }
-
-    for token, expected_id in expected_ids.items():
+    for token, expected_id in SPECIAL_TOKEN_IDS.items():
         actual_id = tokenizer.convert_tokens_to_ids(token)
         if actual_id != expected_id:
             logger.error(
