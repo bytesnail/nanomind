@@ -207,6 +207,74 @@ def save_tokenizer(
         logger.info(f"  - {f.name} ({size:,} bytes)")
 
 
+def postprocess_tokenizer_files(output_dir: Path) -> None:
+    """后处理 tokenizer 文件。
+
+    1. 修改 tokenizer_config.json：设置 is_local = false
+    2. 修改 tokenizer.json：
+       - 删除 vocab 中开头的特殊 token
+       - vocab 中剩下的 token id 往前移（从 0 开始）
+       - added_tokens 的 id 从 vocab 新的最大值往后计数
+
+    Args:
+        output_dir: tokenizer 输出目录
+    """
+    logger.info("开始后处理 tokenizer 文件...")
+
+    # 1. 处理 tokenizer_config.json
+    config_path = output_dir / "tokenizer_config.json"
+    with open(config_path, encoding="utf-8") as f:
+        config = json.load(f)
+
+    config["is_local"] = False
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    logger.info("  tokenizer_config.json: is_local 设置为 false")
+
+    # 2. 处理 tokenizer.json
+    tokenizer_path = output_dir / "tokenizer.json"
+    with open(tokenizer_path, encoding="utf-8") as f:
+        tokenizer_data = json.load(f)
+
+    # 获取当前 vocab
+    vocab = tokenizer_data["model"]["vocab"]
+
+    # 找出需要删除的特殊 token
+    special_token_set = set(SPECIAL_TOKENS)
+
+    # 过滤掉特殊 token，保留其他 token
+    filtered_tokens = [(token, old_id) for token, old_id in vocab.items()
+                       if token not in special_token_set]
+
+    # 按原始 id 排序以保持顺序
+    filtered_tokens.sort(key=lambda x: x[1])
+
+    # 重新分配 id，从 0 开始
+    new_vocab = {}
+    old_to_new_id = {}
+    for new_id, (token, old_id) in enumerate(filtered_tokens):
+        new_vocab[token] = new_id
+        old_to_new_id[old_id] = new_id
+
+    # 新 vocab 最大值
+    max_vocab_id = len(new_vocab) - 1
+
+    # 更新 vocab
+    tokenizer_data["model"]["vocab"] = new_vocab
+    logger.info(f"  tokenizer.json: vocab 重新映射，{len(new_vocab)} 个 token (id 0-{max_vocab_id})")
+
+    # 更新 added_tokens 的 id
+    for i, added_token in enumerate(tokenizer_data.get("added_tokens", [])):
+        added_token["id"] = max_vocab_id + 1 + i
+        logger.info(f"  tokenizer.json: added_token '{added_token['content']}' id = {added_token['id']}")
+
+    # 保存修改后的 tokenizer.json
+    with open(tokenizer_path, "w", encoding="utf-8") as f:
+        json.dump(tokenizer_data, f, indent=2, ensure_ascii=False)
+
+    logger.info("后处理完成")
+
+
 def _load_tokenizer_json(tokenizer_dir: Path) -> dict[str, Any]:
     """加载 tokenizer.json 文件。"""
     json_path = tokenizer_dir / "tokenizer.json"
@@ -387,7 +455,10 @@ def train_tokenizer(
         # 3. 保存 tokenizer
         save_tokenizer(new_tokenizer, output_dir)
 
-        # 4. 验证（如果启用）
+        # 4. 后处理 tokenizer 文件
+        postprocess_tokenizer_files(output_dir)
+
+        # 5. 验证（如果启用）
         if validate:
             success = validate_tokenizer(
                 tokenizer=new_tokenizer,
