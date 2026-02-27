@@ -1,58 +1,58 @@
 datasets:
-  # 英文：总计 192K（24.0%）
+  # 英文：总计 520K（26.0%）
   # 配比：4.0(50%) / 3.5(25%) / 3.0(15%) / 2.5(10%)
   fineweb_en:
     name: "fineweb_edu_en"
     source: "data/datasets/fineweb/en"
-    samples: 288000
+    samples: 520000
     buckets:
       4.0:
-        count: 144000  # 50%
+        count: 260000  # 50%
       3.5:
-        count: 72000   # 25%
+        count: 130000   # 25%
       3.0:
-        count: 43200   # 15%
+        count: 78000   # 15%
       2.5:
-        count: 28800   # 10%
-  # 中文：总计 224K（28.0%）
+        count: 52000   # 10%
+  # 中文：总计 600K（30.0%）
   # 配比：4.0(50%) / 3.5(25%) / 3.0(15%) / 2.5(10%)
   fineweb_zh:
     name: "fineweb_edu_zh"
     source: "data/datasets/fineweb/zh"
-    samples: 336000
+    samples: 600000
     buckets:
       4.0:
-        count: 168000  # 50%
+        count: 300000  # 50%
       3.5:
-        count: 84000   # 25%
+        count: 150000   # 25%
       3.0:
-        count: 50400   # 15%
+        count: 90000   # 15%
       2.5:
-        count: 33600   # 10%
-  # 代码：总计 360K（30.0%）
+        count: 60000   # 10%
+  # 代码：总计 520K（26.0%）
   # 配比：above-2-stars(85%) / below-2-stars(15%)
   github_code:
     name: "github_code"
     source: "data/datasets/nick007x/github-code-2025"
-    samples: 360000
+    samples: 520000
     stars_filter:
       above-2-stars:
-        count: 306000  # 85%
+        count: 442000  # 85%
       below-2-stars:
-        count: 54000   # 15%
-  # 数学：总计 216K（18.0%）
+        count: 78000   # 15%
+  # 数学：总计 360K（18.0%）
   # 配比：4plus(60%) / 4plus_MIND(25%) / 3(15%)
   nemotron_math:
     name: "nemotron_cc_math"
     source: "data/datasets/nvidia/Nemotron-CC-Math-v1"
-    samples: 216000
+    samples: 360000
     buckets:
       4plus:
-        count: 129600  # 60%
+        count: 216000  # 60%
       4plus_MIND:
-        count: 54000   # 25%
+        count: 90000   # 25%
       3:
-        count: 32400   # 15%
+        count: 54000   # 15%
 
 random_seed: 42
 output_format: "parquet"
