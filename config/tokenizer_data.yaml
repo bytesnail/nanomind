@@ -1,58 +1,58 @@
 datasets:
-  # 英文：总计 520K（26.0%）
-  # 配比：4.0(50%) / 3.5(25%) / 3.0(15%) / 2.5(10%)
+  # 英文：总计 576K（24.0%）
+  # 配比：4.0(40%) / 3.5(25%) / 3.0(20%) / 2.5(15%)
   fineweb_en:
     name: "fineweb_edu_en"
     source: "data/datasets/fineweb/en"
-    samples: 520000
+    samples: 576000
     buckets:
       4.0:
-        count: 260000  # 50%
+        count: 230400  # 40%
       3.5:
-        count: 130000   # 25%
+        count: 144000   # 25%
       3.0:
-        count: 78000   # 15%
+        count: 115200   # 20%
       2.5:
-        count: 52000   # 10%
-  # 中文：总计 600K（30.0%）
-  # 配比：4.0(50%) / 3.5(25%) / 3.0(15%) / 2.5(10%)
+        count: 86400   # 15%
+  # 中文：总计 960K（40.0%）
+  # 配比：4.0(40%) / 3.5(25%) / 3.0(20%) / 2.5(15%)
   fineweb_zh:
     name: "fineweb_edu_zh"
     source: "data/datasets/fineweb/zh"
-    samples: 600000
+    samples: 960000
     buckets:
       4.0:
-        count: 300000  # 50%
+        count: 384000  # 40%
       3.5:
-        count: 150000   # 25%
+        count: 240000   # 25%
       3.0:
-        count: 90000   # 15%
+        count: 192000   # 20%
       2.5:
-        count: 60000   # 10%
-  # 代码：总计 520K（26.0%）
-  # 配比：above-2-stars(85%) / below-2-stars(15%)
+        count: 144000   # 15%
+  # 代码：总计 432K（18.0%）
+  # 配比：above-2-stars(80%) / below-2-stars(20%)
   github_code:
     name: "github_code"
     source: "data/datasets/nick007x/github-code-2025"
-    samples: 520000
+    samples: 432000
     stars_filter:
       above-2-stars:
-        count: 442000  # 85%
+        count: 345600  # 80%
       below-2-stars:
-        count: 78000   # 15%
-  # 数学：总计 360K（18.0%）
-  # 配比：4plus(60%) / 4plus_MIND(25%) / 3(15%)
+        count: 86400   # 20%
+  # 数学：总计 432K（18.0%）
+  # 配比：4plus(50%) / 4plus_MIND(25%) / 3(25%)
   nemotron_math:
     name: "nemotron_cc_math"
     source: "data/datasets/nvidia/Nemotron-CC-Math-v1"
-    samples: 360000
+    samples: 432000
     buckets:
       4plus:
-        count: 216000  # 60%
+        count: 216000  # 50%
       4plus_MIND:
-        count: 90000   # 25%
+        count: 108000   # 25%
       3:
-        count: 54000   # 15%
+        count: 108000   # 25%
 
 random_seed: 42
 output_format: "parquet"
