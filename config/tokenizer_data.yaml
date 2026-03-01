@@ -29,30 +29,30 @@ datasets:
         count: 240000   # 20%
       2.5:
         count: 180000   # 15%
-  # 代码：总计 540K（18.0%）
+  # 代码：总计 660K（22.0%）
   # 配比：above-2-stars(80%) / below-2-stars(20%)
   github_code:
     name: "github_code"
     source: "data/datasets/nick007x/github-code-2025"
-    samples: 540000
+    samples: 660000
     stars_filter:
       above-2-stars:
-        count: 432000  # 80%
+        count: 528000  # 80%
       below-2-stars:
-        count: 108000   # 20%
-  # 数学：总计 540K（18.0%）
+        count: 132000   # 20%
+  # 数学：总计 420K（14.0%）
   # 配比：4plus(50%) / 4plus_MIND(25%) / 3(25%)
   nemotron_math:
     name: "nemotron_cc_math"
     source: "data/datasets/nvidia/Nemotron-CC-Math-v1"
-    samples: 540000
+    samples: 420000
     buckets:
       4plus:
-        count: 270000  # 50%
+        count: 210000  # 50%
       4plus_MIND:
-        count: 135000   # 25%
+        count: 105000   # 25%
       3:
-        count: 135000   # 25%
+        count: 105000   # 25%
 
 random_seed: 42
 output_format: "parquet"
