@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |------|-----|
-| **覆盖范围** | `94eeacd` ~ `7731e66` (89 commits) |
-| **最后更新** | `7731e66` @ 2026-02-16 |
+| **覆盖范围** | `94eeacd` ~ `de2c58d` (178 commits) |
+| **最后更新** | `de2c58d` @ 2026-03-03 |
 
 > 💡 **使用方式**：`根据docs/KNOWLEDGE_BASE.md的增量更新指南，分析 所有未分析commit 的知识库更新计划` → 输出计划书 → `执行计划` → `应用更新`
 
@@ -88,6 +88,8 @@
 5. 全部波次完成 → 更新元信息
 6. 用户拒绝/超时（>24h）→ 结束本次更新，不做任何修改
 ```
+
+> 📝 **指南演进**: 本指南经过多次迭代（`c9fbe67`, `e8ac07e`, `31e7790`, `0fe4cfd`, `8197409`），逐步增强结构化与可操作性。
 
 ### 优先级
 
@@ -280,6 +282,36 @@ def test_find_bucket(score, expected):
 config = yaml.safe_load(f) or {}
 ```
 
+### 2.5 HuggingFace Tokenizers
+
+```python
+# train_new_from_iterator — 自动继承模板配置
+new_tokenizer = template.train_new_from_iterator(
+    text_iterator,
+    vocab_size=36005,
+)
+# 自动继承: normalizer, pre_tokenizer, decoder, post_processor
+
+# 特殊 Token 定义
+SPECIAL_TOKENS = ["", "<|im_start|>", "<|im_end|>", "oliniht", ""]
+
+# tokenizer.json 后处理：vocab 重新映射
+special_set = set(SPECIAL_TOKENS)
+filtered = [(t, id) for t, id in vocab.items() if t not in special_set]
+new_vocab = {t: new_id for new_id, (t, _) in enumerate(sorted(filtered))}
+
+# extra_special_tokens vs added_tokens
+# added_tokens: 5个（含 ）
+# extra_special_tokens: 4个（不含 ，仅对话+推理token）
+```
+
+**训练流程**:
+1. 加载模板 tokenizer: `AutoTokenizer.from_pretrained(template_dir)`
+2. 创建文本迭代器: `create_text_iterator()` 流式读取 Parquet
+3. 训练: `template.train_new_from_iterator(text_iterator, vocab_size)`
+4. 后处理: vocab 重新映射 + added_tokens ID 调整
+5. 保存: `tokenizer.save_pretrained(output_dir)`
+
 ---
 
 ## 三、项目架构知识
@@ -329,6 +361,45 @@ ParquetReader → ScoreFilter → BucketPathWriter
 | 预计算 | 采样索引 | O(target × 16 bytes) |
 | 处理 | 流式 Pipeline | 不累积 |
 
+### 3.4 Tokenizer 训练系统
+
+```
+scripts/
+├── train_tokenizer.py              # BPE 训练主脚本
+├── prepare_tokenizer_data.py       # 多数据源采样（两遍处理）
+├── prepare_tokenizer_template.py   # 模板准备
+config/
+└── tokenizer_data.yaml             # 数据采样配置
+output/
+├── qwen3_next_tokenizer/           # 模板 tokenizer
+└── tokenizer_36k/                  # 训练输出
+```
+
+**Pipeline 架构**:
+```
+ParquetReader → IndexFilter → LanguageTagger → SourceTagger → TokenizerDataWriter
+```
+
+**两遍处理架构**:
+| 阶段 | 操作 | 内存占用 |
+|------|------|----------|
+| 第一遍 | 预计算采样索引（只读元数据 + 计算哈希） | O(target × 16 bytes) |
+| 第二遍 | 流式读取选中文档并写入 Parquet | 流式，不累积 |
+
+**采样算法**:
+- 使用确定性哈希（MD5 前 8 字节）+ 最大堆采样
+- 目标数 ≥ 总数 90% 时自动切换为全量处理模式
+
+**GitHub Code 语言过滤**:
+| 语言 | 扩展名 |
+|------|--------|
+| Python | `.py`, `.pyw`, `.pyi` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` |
+| C/C++ | `.c`, `.h`, `.cpp`, `.hpp`, `.cc` |
+| Rust | `.rs` |
+| 其他 | HTML/CSS/Markdown/JSON/XML/TOML 等 |
+
 ---
 
 ## 四、相关参数与命令
@@ -362,6 +433,48 @@ io_workers = max_workers * 2
 |--------|----------|------|
 | FineWeb-EN | 0-5 | 无 |
 | FineWeb-ZH | 0-1 | `× 5` |
+
+### 4.4 Tokenizer 训练参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--vocab-size` | 36005 | 词表大小（36000 BPE + 5 特殊 token） |
+| `--batch-size` | 10000 | Parquet 读取批次大小 |
+| `--data-dir` | `data/datasets/nanomind_tokenizer` | 训练数据目录 |
+| `--template-dir` | `output/qwen3_next_tokenizer` | 模板目录 |
+| `--output-dir` | `output/tokenizer_36k` | 输出目录 |
+| `--validate` | True | 是否执行验证 |
+
+**数据采样配置** (`config/tokenizer_data.yaml`):
+| 数据集 | 样本数 | 占比 |
+|--------|--------|------|
+| FineWeb-EN | 720K | 24% |
+| FineWeb-ZH | 1.2M | 40% |
+| GitHub Code | 660K | 22% |
+| Nemotron Math | 420K | 14% |
+
+**采样配置字段**:
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 数据集名称，用于标记输出数据来源 |
+| `source` | 是 | 源数据目录路径 |
+| `samples` | 是 | 目标采样数量 |
+| `buckets` | 二选一 | 质量分桶配置（FineWeb、Nemotron） |
+| `stars_filter` | 二选一 | Stars 过滤配置（GitHub Code） |
+
+**配置演进历史**:
+| 日期 | 词表 | 样本 | EN | ZH | Code | Math | Commit |
+|------|------|------|----|----|------|------|--------|
+| 2026-02-20 | 24K | - | - | - | - | - | `f3fdebf` |
+| 2026-02-20 | 32K | - | - | - | - | - | `88ed2ec` |
+| 2026-02-22 | 32K | 0.8M | 24% | 28% | 32% | 16% | `b496fb0` |
+| 2026-02-22 | 32K | 1.2M | - | - | 30% | 18% | `97dc0c7` |
+| 2026-02-27 | 36K | 2M | 26% | 30% | 26% | 18% | `c6bff2c` |
+| 2026-02-28 | 36K | 2.4M | - | - | - | - | `e286bd8` |
+| 2026-03-01 | 36K | 3M | - | - | - | - | `ca27976` |
+| 2026-03-01 | 36K | 3M | 24% | 40% | 22% | 14% | `fbbf238` |
+
+> 💡 最终配置：36K 词表 + 3M 样本（EN:720K/24%, ZH:1.2M/40%, Code:660K/22%, Math:420K/14%）
 
 ---
 
@@ -407,6 +520,12 @@ io_workers = max_workers * 2
 - PipelineStep 设置 `name` 和 `type` 属性
 - adapter 函数扩展 Reader 行为
 
+**Tokenizer 训练**
+- `train_new_from_iterator` 自动继承模板配置，避免手动复制
+- 两遍处理分离预计算和数据读取，降低内存峰值
+- 使用 `gc.collect()` 每批次后清理内存
+- `ParquetFile.iter_batches()` 实现真正的流式读取
+
 ### 6.2 DO NOT（不推荐做法）
 
 | 类别 | 禁止 |
@@ -416,6 +535,7 @@ io_workers = max_workers * 2
 | 数据 | 假设固定宽度编码、全量加载后处理、循环内 import |
 | 并发 | 串行逻辑处理并行场景、堆中存储 Path 等大对象 |
 | 架构 | 可复用逻辑留在脚本、数据集逻辑放通用模块 |
+| Tokenizer | 忽略 `added_tokens` 与 `extra_special_tokens` 的差异、手动复制模板配置项 |
 
 ### 6.3 NEVER（禁止做法）
 
@@ -426,6 +546,15 @@ io_workers = max_workers * 2
 | 数据 | 负数索引/空路径生成 ID、采样循环创建大量临时对象 |
 | 框架 | 忽略 Datatrove 任务检测、Writer 返回非 None |
 | 内存 | 一次性加载大规模数据集、共享 Datatrove 日志目录 |
+| Tokenizer | 训练时遗漏 `--validate` 验证、跳过 tokenizer.json 后处理步骤 |
+
+### 6.4 修复记录
+
+| Commit | 问题 | 解决 |
+|--------|------|------|
+| `8d51fea` | TokenizerDataWriter 多批次写入覆盖 | 修复 IndexFilter 索引格式兼容性 |
+| `2d6b14f` | IndexFilter 路径匹配失败 | 修复路径匹配逻辑 |
+| `c9cae5e` | metadata 合并顺序 + 日志目录冲突 | 调整合并顺序，独立日志目录 |
 
 ---
 
@@ -457,4 +586,4 @@ if os.path.exists("/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"):
 
 ---
 
-*文档版本: v2.0 | 生成日期: 2026-03-01*
+*文档版本: v3.0 | 生成日期: 2026-03-03*
