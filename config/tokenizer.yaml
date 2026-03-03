@@ -1,0 +1,43 @@
+# Tokenizer 配置
+# 统一管理所有 tokenizer 相关的常量和配置
+
+# 模板配置
+template:
+  model: "Qwen/Qwen3-Next-80B-A3B-Instruct"
+  output_dir: "output/qwen3_next_tokenizer_origin"
+  modified_dir: "output/qwen3_next_tokenizer"
+
+# 特殊 tokens
+special_tokens:
+  # 基础 tokens（必须保留）
+  base:
+    - "<|endoftext|>"  # padding
+    - "<|im_start|>"  # message start
+    - "<|im_end|>"    # message end
+  # 思考 tokens（用于 CoT）
+  think:
+    - "<think>"   # think start
+    - "</think>"   # think end
+  # 完整列表（用于训练）
+  all:
+    - "<|endoftext|>"
+    - "<|im_start|>"
+    - "<|im_end|>"
+    - "<think>"
+    - "</think>"
+
+# 训练配置
+training:
+  vocab_size: 36005        # 36000 BPE + 5 特殊 token
+  data_dir: "data/datasets/nanomind_tokenizer"
+  output_dir: "output/tokenizer_36k"
+  batch_size: 10000
+
+# 数据准备配置
+preparation:
+  workers: 16
+  tasks: -1                  # -1 表示自动
+  max_rows_per_file: 500000
+  buffer_size: 50000
+  compression: "zstd"
+  randomize_start_duration: 5

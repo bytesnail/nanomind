@@ -22,3 +22,15 @@ dev = [
     "pytest>=9.0.2",
     "ruff>=0.15.0",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]  # 脚本需要先设置 sys.path 再导入项目模块
+"tests/*" = ["N801"]  # 测试中的 mock 类可以不遵循 CapWords 命名约定
