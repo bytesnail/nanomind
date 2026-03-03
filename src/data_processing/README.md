@@ -1,21 +1,20 @@
 # FineWeb-Edu 数据处理模块
 
-FineWeb-Edu 数据集质量评分分桶重组的数据处理流水线。
+基于 Datatrove 的高性能数据处理流水线，实现 FineWeb-Edu 数据集的质量评分分桶重组。
 
 ## 模块结构
 
 ```
 src/data_processing/
-├── __init__.py              # 模块入口，导出 18 个公开 API
-├── config_loader.py         # YAML 配置加载器 (LRU 缓存)
-├── bucket_config.py         # BucketConfig 数据类 + 二分查找
-├── score_filter.py          # ScoreFilter PipelineStep
-├── bucket_path_writer.py    # BucketPathWriter PipelineStep
-├── parquet_merger.py        # Parquet 文件合并工具
-├── validation.py            # 数据验证 + 报告生成
-└── fineweb_edu/             # FineWeb-Edu 专用子模块
-    ├── __init__.py          # 子模块入口
-    ├── __main__.py          # CLI 入口
+├── __init__.py              # 模块入口，导出公开 API
+├── bucket_config.py         # 评分桶配置
+├── score_filter.py          # 评分过滤与确定性采样
+├── bucket_path_writer.py    # 多桶并行 Parquet 写入
+├── parquet_merger.py        # Parquet 文件合并
+├── validation.py            # 数据验证与报告
+├── config_loader.py         # YAML 配置加载
+└── fineweb_edu/             # FineWeb-Edu 专用流水线
+    ├── __init__.py
     ├── adapters.py          # 数据适配器
     └── reorganizer.py       # 处理流水线
 ```
@@ -28,57 +27,35 @@ from src.data_processing import (
     BucketConfig,
     Compression,
     find_bucket_for_score,
-    find_bucket_in_sorted,
     get_all_bucket_configs,
-    # PipelineSteps
-    BucketPathWriter,
+    # Pipeline 组件
     ScoreFilter,
+    BucketPathWriter,
     # 处理函数
     fineweb_adapter,
     normalize_score,
     process_all_datasets,
     process_single_dataset,
-    # 工具
+    # 工具函数
     merge_all_buckets,
     merge_bucket_files,
-    print_report,
     validate_all_buckets,
     validate_bucket,
     validate_file,
+    print_report,
 )
 ```
 
 ## 核心组件
 
-| 组件 | 文件 | 说明 |
-|------|------|------|
-| `BucketConfig` | `bucket_config.py` | 评分桶配置数据类 |
-| `ScoreFilter` | `score_filter.py` | 评分过滤 + 确定性采样 |
-| `BucketPathWriter` | `bucket_path_writer.py` | 多桶并行 Parquet 写入 |
-| `merge_all_buckets` | `parquet_merger.py` | 合并所有桶的文件 |
-| `fineweb_adapter` | `adapters.py` | 数据适配器函数 |
-| `normalize_score` | `adapters.py` | 分数归一化 |
-| `process_all_datasets` | `reorganizer.py` | 处理所有配置的数据集 |
-| `process_single_dataset` | `reorganizer.py` | 处理单个数据集 |
-
-## CLI 使用
-
-```bash
-# 处理所有配置的数据集
-python -m src.data_processing.fineweb_edu
-
-# 试运行（小规模测试）
-python scripts/trial_run.py
-
-# 试运行指定数据集
-python scripts/trial_run.py --dataset zh
-
-# 验证输出
-python scripts/validate_output.py --all
-
-# 验证单个目录
-python scripts/validate_output.py --input data/datasets/fineweb/en --dataset en
-```
+| 组件 | 说明 |
+|------|------|
+| `BucketConfig` | 评分桶配置数据类（名称、分数范围、采样率） |
+| `ScoreFilter` | 评分过滤 PipelineStep，支持 MD5 哈希确定性采样 |
+| `BucketPathWriter` | 多桶并行 Parquet 写入 PipelineStep |
+| `merge_all_buckets` | 合并各桶的小文件到目标大小 |
+| `fineweb_adapter` | FineWeb-Edu 数据适配器 |
+| `normalize_score` | 分数归一化（中文数据集 ×5.0） |
 
 ## 使用示例
 
@@ -127,7 +104,40 @@ print(bucket.sampling_rate)  # 0.5
 | `config/processing.yaml` | 处理参数（workers、compression、文件大小） |
 | `config/paths.yaml` | 路径配置 |
 
+配置示例 (`config/dataset.yaml`):
+
+```yaml
+datasets:
+  en:
+    score_normalization:
+      enabled: false
+    input_dir: "data/datasets/HuggingFaceFW/fineweb-edu"
+    output_dir: "data/datasets/fineweb/en"
+    buckets:
+      - name: "2.5"
+        min_score: 2.5
+        max_score: 3.0
+        sampling_rate: 0.25
+      - name: "4.0"
+        min_score: 4.0
+        sampling_rate: 1.0
+```
+
+## CLI 使用
+
+```bash
+# 处理所有配置的数据集
+python -m src.data_processing.fineweb_edu
+
+# 试运行（小规模测试）
+python scripts/trial_run.py --dataset zh
+
+# 验证输出
+python scripts/validate_output.py --all
+```
+
 ## 相关文档
 
-- [设计文档](../../docs/fineweb_edu_data_reorganization_design.md) - 架构设计、扩展指南
-- [项目 README](../../README.md) - 项目总体说明
+- [项目 README](../../README.md) - 项目总体说明与快速开始
+- [设计文档](../../docs/fineweb_edu_data_reorganization_design.md) - 系统架构与扩展指南
+- [AGENTS.md](../../AGENTS.md) - 开发规范
