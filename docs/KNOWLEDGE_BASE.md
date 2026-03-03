@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |------|-----|
-| **覆盖范围** | `94eeacd` ~ `de2c58d` (178 commits) |
-| **最后更新** | `de2c58d` @ 2026-03-03 |
+| **覆盖范围** | `94eeacd` ~ `b551a08` (191 commits) |
+| **最后更新** | `b551a08` @ 2026-03-04 |
 
 > 💡 **使用方式**：`根据docs/KNOWLEDGE_BASE.md的增量更新指南，分析 所有未分析commit 的知识库更新计划` → 输出计划书 → `执行计划` → `应用更新`
 
@@ -133,6 +133,15 @@ self._bloom_filter: "ScalableBloomFilter | None" = None
 # TYPE_CHECKING 条件导入
 if TYPE_CHECKING:
     from pybloom_live import ScalableBloomFilter
+
+# Iterator 类型注解 (Python 3.9+)
+from collections.abc import Iterator
+from datatrove.data import Document
+
+def run(self, data, rank: int = 0, world_size: int = 1) -> Iterator[Document]:
+    for doc in data:
+        if self._should_keep(doc):
+            yield doc
 ```
 
 ### 1.2 数据类
@@ -274,7 +283,9 @@ parser.add_argument("--input", "-i", type=Path, default=Path("data/..."))
 parser.add_argument("--bucket", choices=["2.8", "3.0", "3.5", "4.0"])
 
 # pytest 参数化
-@pytest.mark.parametrize("score,expected", [(3.5, "3.5"), (4.2, "4.0")])
+@pytest.mark.parametrize("score,expected", [
+    (2.5, "2.8"), (3.0, "3.0"), (3.7, "3.5"), (4.5, "4.0")
+])
 def test_find_bucket(score, expected):
     assert find_bucket_for_score(score).name == expected
 
@@ -325,9 +336,16 @@ src/data_processing/
 ├── bucket_config.py         # 评分桶配置（通用）
 ├── score_filter.py          # 评分过滤器（通用）
 ├── bucket_path_writer.py    # 桶路径写入器（通用）
+├── parquet_merger.py        # Parquet 合并工具
 └── fineweb_edu/             # FineWeb-Edu 专用
     ├── __main__.py          # CLI: python -m src.data_processing.fineweb_edu
     └── adapters.py          # 数据适配器
+
+src/
+└── constants.py             # 项目级常量定义
+
+scripts/
+└── utils.py                 # 脚本工具模块（日志、JSON工具）
 ```
 
 ### 3.2 配置分层与设计模式
@@ -336,7 +354,9 @@ src/data_processing/
 config/
 ├── buckets.yaml      # 业务：评分桶定义
 ├── processing.yaml   # 运行：workers, tasks, compression
-└── paths.yaml        # 路径：输入/输出目录
+├── paths.yaml        # 路径：输入/输出目录
+├── tokenizer.yaml    # Tokenizer：训练参数统一配置
+└── tokenizer_data.yaml  # Tokenizer：数据采样配置
 ```
 
 ```python
@@ -346,6 +366,26 @@ def get_all_bucket_configs() -> list[BucketConfig]:
     global _DEFAULT_BUCKETS
     if _DEFAULT_BUCKETS is None: _DEFAULT_BUCKETS = _load_buckets()
     return _DEFAULT_BUCKETS
+
+# 统一配置加载
+def get_tokenizer_config() -> dict[str, Any]:
+    return load_config("tokenizer")
+```
+
+**项目级常量** (`src/constants.py`):
+
+```python
+# 特殊 Token 定义
+SPECIAL_TOKENS = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
+
+# 代码语言扩展名映射
+LANGUAGE_EXTENSIONS = {
+    "python": [".py", ".pyw", ".pyi"],
+    "javascript": [".js", ".jsx", ".mjs", ".cjs"],
+    "typescript": [".ts", ".tsx", ".mts", ".cts"],
+    "cpp": [".c", ".h", ".cpp", ".hpp", ".cc"],
+    "rust": [".rs"],
+}
 ```
 
 ### 3.3 Pipeline 架构
@@ -412,6 +452,21 @@ uv pip compile pyproject.toml -o requirements.txt
 uv pip install -r requirements.txt
 ```
 
+### 4.2 脚本工具模块
+
+**scripts/utils.py** 提供跨脚本复用工具：
+
+```python
+from scripts.utils import setup_logging, read_json, write_json
+
+# 统一日志配置
+logger = setup_logging("prepare_tokenizer_data")
+
+# JSON 读写工具
+data = read_json(path)           # 支持 Path 对象
+write_json(path, data, indent=2) # 自动创建父目录
+```
+
 ### 4.2 性能参数
 
 | 参数 | 默认值 | 说明 |
@@ -436,14 +491,36 @@ io_workers = max_workers * 2
 
 ### 4.4 Tokenizer 训练参数
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--vocab-size` | 36005 | 词表大小（36000 BPE + 5 特殊 token） |
-| `--batch-size` | 10000 | Parquet 读取批次大小 |
-| `--data-dir` | `data/datasets/nanomind_tokenizer` | 训练数据目录 |
-| `--template-dir` | `output/qwen3_next_tokenizer` | 模板目录 |
-| `--output-dir` | `output/tokenizer_36k` | 输出目录 |
-| `--validate` | True | 是否执行验证 |
+**统一配置** (`config/tokenizer.yaml`):
+
+```yaml
+training:
+  vocab_size: 36005          # 36000 BPE + 5 特殊 token
+  batch_size: 10000          # Parquet 读取批次
+  min_frequency: 2           # BPE 最小频率
+  
+paths:
+  data_dir: "data/datasets/nanomind_tokenizer"
+  template_dir: "output/qwen3_next_tokenizer"
+  output_dir: "output/tokenizer_36k"
+  
+special_tokens:
+  - "<|endoftext|>"
+  - "<|im_start|>"
+  - "<|im_end|>"
+  - "<think>"
+  - "</think>"
+```
+
+**配置加载**:
+
+```python
+from src.data_processing import load_config
+from src.constants import SPECIAL_TOKENS, LANGUAGE_EXTENSIONS
+
+config = load_config("tokenizer")
+vocab_size = config["training"]["vocab_size"]
+```
 
 **数据采样配置** (`config/tokenizer_data.yaml`):
 | 数据集 | 样本数 | 占比 |
@@ -552,6 +629,8 @@ io_workers = max_workers * 2
 
 | Commit | 问题 | 解决 |
 |--------|------|------|
+| `c74171d` | Tokenizer 配置分散在多个脚本 | 新增 `config/tokenizer.yaml` 统一配置 |
+| `6e45111` | 脚本间日志/JSON 工具重复 | 新增 `scripts/utils.py` 公共工具模块 |
 | `8d51fea` | TokenizerDataWriter 多批次写入覆盖 | 修复 IndexFilter 索引格式兼容性 |
 | `2d6b14f` | IndexFilter 路径匹配失败 | 修复路径匹配逻辑 |
 | `c9cae5e` | metadata 合并顺序 + 日志目录冲突 | 调整合并顺序，独立日志目录 |
@@ -586,4 +665,4 @@ if os.path.exists("/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"):
 
 ---
 
-*文档版本: v3.0 | 生成日期: 2026-03-03*
+*文档版本: v4.0 | 生成日期: 2026-03-04*
