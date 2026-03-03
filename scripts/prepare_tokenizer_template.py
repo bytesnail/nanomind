@@ -7,8 +7,10 @@
 
 用法:
     python scripts/prepare_tokenizer_template.py
-    python scripts/prepare_tokenizer_template.py --output-dir output/qwen3_next_tokenizer_origin
-    python scripts/prepare_tokenizer_template.py --model Qwen/Qwen3-Next-80B-A3B-Instruct
+    python scripts/prepare_tokenizer_template.py \
+        --output-dir output/qwen3_next_tokenizer_origin
+    python scripts/prepare_tokenizer_template.py \
+        --model Qwen/Qwen3-Next-80B-A3B-Instruct
 
 输出:
     output/qwen3_next_tokenizer_origin/
@@ -23,27 +25,30 @@
 """
 
 import argparse
-import json
-import logging
 import sys
 from pathlib import Path
 
 from transformers import AutoTokenizer
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# 添加项目根目录到 Python 路径，支持脚本直接运行
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from scripts.utils import read_json, setup_logging, write_json
+from src.constants import BASE_SPECIAL_TOKENS, THINK_TOKENS
+from src.data_processing.config_loader import get_tokenizer_config
+
+logger = setup_logging()
+
+_tokenizer_cfg = get_tokenizer_config()
+_template_cfg = _tokenizer_cfg.get("template", {})
+
+DEFAULT_MODEL = _template_cfg.get("model", "Qwen/Qwen3-Next-80B-A3B-Instruct")
+DEFAULT_OUTPUT_DIR = Path(
+    _template_cfg.get("output_dir", "output/qwen3_next_tokenizer_origin")
 )
-logger = logging.getLogger(__name__)
-
-DEFAULT_MODEL = "Qwen/Qwen3-Next-80B-A3B-Instruct"
-DEFAULT_OUTPUT_DIR = Path("output/qwen3_next_tokenizer_origin")
-MODIFIED_OUTPUT_DIR = Path("output/qwen3_next_tokenizer")
-
-# 需要保留的基础 special tokens（按顺序）
-BASE_SPECIAL_TOKENS = ["<|endoftext|>", "<|im_start|>", "<|im_end|>"]
-
-# 需要添加的 think tokens
-THINK_TOKENS = ["<think>", "</think>"]
+MODIFIED_OUTPUT_DIR = Path(
+    _template_cfg.get("modified_dir", "output/qwen3_next_tokenizer")
+)
 
 
 def _create_modified_tokenizer_config(config: dict) -> dict:
@@ -55,7 +60,7 @@ def _create_modified_tokenizer_config(config: dict) -> dict:
 
 
 def _create_modified_tokenizer_json(tokenizer_data: dict) -> dict:
-    """修改 tokenizer.json，仅保留基础 special tokens 并将 think tokens 设为 special。"""
+    """修改 tokenizer.json，仅保留基础 special tokens 并将 think tokens 设为 special."""
     added_tokens = tokenizer_data.get("added_tokens", [])
 
     # 找到基础 special tokens
@@ -141,28 +146,24 @@ def prepare_tokenizer_template(
     # 复制并修改 tokenizer_config.json
     config_path = output_dir / "tokenizer_config.json"
     modified_config_path = modified_dir / "tokenizer_config.json"
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
+    config = read_json(config_path)
     config = _create_modified_tokenizer_config(config)
-    with open(modified_config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    write_json(modified_config_path, config)
     logger.info("已修改并保存 tokenizer_config.json")
 
     # 复制并修改 tokenizer.json
     tokenizer_json_path = output_dir / "tokenizer.json"
     modified_tokenizer_path = modified_dir / "tokenizer.json"
-    with open(tokenizer_json_path, "r", encoding="utf-8") as f:
-        tokenizer_data = json.load(f)
+    tokenizer_data = read_json(tokenizer_json_path)
     tokenizer_data = _create_modified_tokenizer_json(tokenizer_data)
-    with open(modified_tokenizer_path, "w", encoding="utf-8") as f:
-        json.dump(tokenizer_data, f, indent=2, ensure_ascii=False)
+    write_json(modified_tokenizer_path, tokenizer_data)
     logger.info("已修改并保存 tokenizer.json")
 
     # 复制 chat_template.jinja（保持不变）
     template_path = output_dir / "chat_template.jinja"
     modified_template_path = modified_dir / "chat_template.jinja"
     if template_path.exists():
-        with open(template_path, "r", encoding="utf-8") as f:
+        with open(template_path, encoding="utf-8") as f:
             template_content = f.read()
         with open(modified_template_path, "w", encoding="utf-8") as f:
             f.write(template_content)

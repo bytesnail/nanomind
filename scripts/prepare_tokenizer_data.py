@@ -26,13 +26,12 @@ import gc
 import hashlib
 import heapq
 import json
-import logging
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -49,79 +48,27 @@ _JEMALLOC_PATH = "/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
 if os.path.exists(_JEMALLOC_PATH) and "LD_PRELOAD" not in os.environ:
     os.environ.setdefault("LD_PRELOAD", _JEMALLOC_PATH)
 
+# 添加项目根目录到 Python 路径，支持脚本直接运行
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from scripts.utils import setup_logging
+from src.constants import ALLOWED_LANGUAGE_EXTENSIONS, LANGUAGE_EXTENSIONS
+from src.data_processing.config_loader import get_tokenizer_config
 
 CONFIG_PATH = Path("config/tokenizer_data.yaml")
 
-CPU_COUNT = os.cpu_count() or 16
-DEFAULT_WORKERS = min(16, CPU_COUNT)
-DEFAULT_TASKS = -1
-DEFAULT_MAX_ROWS = 500_000
-DEFAULT_BATCH_SIZE = 50_000
-COMPRESSION = "zstd"
-RANDOMIZE_START_DURATION = 5
+logger = setup_logging()
 
-# GitHub Code 数据集：扩展名到语言名称的映射
-LANGUAGE_EXTENSIONS: dict[str, str] = {
-    # C
-    ".c": "c",
-    ".h": "c",
-    # C++
-    ".cpp": "cpp",
-    ".hpp": "cpp",
-    ".cc": "cpp",
-    ".cxx": "cpp",
-    ".hxx": "cpp",
-    # Python
-    ".py": "python",
-    ".pyw": "python",
-    ".pyi": "python",
-    # Rust
-    ".rs": "rust",
-    # HTML
-    ".html": "html",
-    ".htm": "html",
-    ".xhtml": "html",
-    # CSS
-    ".css": "css",
-    ".scss": "css",
-    ".sass": "css",
-    ".less": "css",
-    # JavaScript
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    # TypeScript
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".mts": "typescript",
-    ".cts": "typescript",
-    # Markdown
-    ".md": "markdown",
-    ".markdown": "markdown",
-    ".mkd": "markdown",
-    # JSON
-    ".json": "json",
-    ".jsonc": "json",
-    ".jsonl": "json",
-    # XML
-    ".xml": "xml",
-    ".xsl": "xml",
-    ".xslt": "xml",
-    ".svg": "xml",
-    ".wsdl": "xml",
-    # TOML
-    ".toml": "toml",
-}
+# 从配置文件加载默认参数
+_tokenizer_cfg = get_tokenizer_config()
+_prep_cfg = _tokenizer_cfg.get("preparation", {})
 
-# 允许的扩展名集合（从 LANGUAGE_EXTENSIONS 派生）
-ALLOWED_LANGUAGES: set[str] = set(LANGUAGE_EXTENSIONS.keys())
+DEFAULT_WORKERS: int = _prep_cfg.get("workers", 16)
+DEFAULT_TASKS: int = _prep_cfg.get("tasks", -1)
+DEFAULT_MAX_ROWS: int = _prep_cfg.get("max_rows_per_file", 500_000)
+DEFAULT_BATCH_SIZE: int = _prep_cfg.get("buffer_size", 50_000)
+COMPRESSION: str = _prep_cfg.get("compression", "zstd")
+RANDOMIZE_START_DURATION: int = _prep_cfg.get("randomize_start_duration", 5)
 
 
 @dataclass
@@ -305,7 +252,7 @@ def precompute_sampling_indices(
     bucket_name: str,
     seed: int,
     target_count: int,
-    allowed_extensions: set[str] | None = None,
+    allowed_extensions: frozenset[str] | None = None,
 ) -> dict[Path, set[int]]:
     """预计算采样索引。
 
@@ -350,8 +297,9 @@ def precompute_sampling_indices(
             logger.warning(f"处理文件失败 {fp}: {e}")
 
     result = _build_result_from_heap(max_heap, file_list)
+    selected_count = sum(len(v) for v in result.values())
     logger.info(
-        f"  [{bucket_name}] 扫描 {total_scanned:,} 个文档，选中 {sum(len(v) for v in result.values()):,} 个"
+        f"  [{bucket_name}] 扫描 {total_scanned:,} 个文档，选中 {selected_count:,} 个"
     )
     return result
 
@@ -361,7 +309,7 @@ def _precompute_with_content_filter(
     bucket_name: str,
     seed: int,
     target_count: int,
-    allowed_extensions: set[str],
+    allowed_extensions: frozenset[str],
 ) -> dict[Path, set[int]]:
     """预计算采样索引，根据内容过滤（用于github_code）。"""
     file_list = list(files)
@@ -461,7 +409,7 @@ class LanguageTagger(PipelineStep):
     name = "Language Tagger"
     type = "🏷️ - LANG"
 
-    def __init__(self, allowed_extensions: set[str]):
+    def __init__(self, allowed_extensions: frozenset[str]):
         super().__init__()
         self.allowed_extensions = allowed_extensions
 
@@ -551,7 +499,10 @@ class TokenizerDataWriter(PipelineStep):
 
         table = pa.table(table_data)
 
-        filename = f"{self.dataset_name}-{self.bucket_name}-{self._batch_counter:05d}-rank-{rank:05d}.parquet"
+        filename = (
+            f"{self.dataset_name}-{self.bucket_name}-"
+            f"{self._batch_counter:05d}-rank-{rank:05d}.parquet"
+        )
         output_path = self.output_dir / filename
 
         pq.write_table(table, output_path, compression=self.compression)
@@ -769,7 +720,7 @@ def _process_sampled(
             bucket_name=bucket_name,
             seed=seed,
             target_count=target_count,
-            allowed_extensions=ALLOWED_LANGUAGES,
+            allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS,
         )
     else:
         indices = precompute_sampling_indices(
@@ -801,7 +752,7 @@ def _process_sampled(
 
     # github_code数据集：添加语言标记（过滤已在采样前完成）
     if "github" in dataset_name.lower():
-        pipeline.append(LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES))
+        pipeline.append(LanguageTagger(allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS))
 
     pipeline.extend(
         [

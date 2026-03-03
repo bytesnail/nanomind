@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import gc
 import json
-import logging
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,19 +30,30 @@ from typing import Any
 import pyarrow.parquet as pq
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# 添加项目根目录到 Python 路径，支持脚本直接运行
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from scripts.utils import setup_logging
+from src.constants import SPECIAL_TOKENS
+from src.data_processing.config_loader import get_tokenizer_config
+
+# 加载 tokenizer 配置
+_tokenizer_cfg = get_tokenizer_config()
+_training_cfg = _tokenizer_cfg.get("training", {})
+_template_cfg = _tokenizer_cfg.get("template", {})
+
+# 默认配置（从 YAML 加载，保持单一数据源）
+DEFAULT_DATA_DIR = Path(
+    _training_cfg.get("data_dir", "data/datasets/nanomind_tokenizer")
 )
-logger = logging.getLogger(__name__)
+DEFAULT_TEMPLATE_DIR = Path(
+    _template_cfg.get("modified_dir", "output/qwen3_next_tokenizer")
+)
+DEFAULT_OUTPUT_DIR = Path(_training_cfg.get("output_dir", "output/tokenizer_36k"))
+DEFAULT_VOCAB_SIZE = _training_cfg.get("vocab_size", 36005)
+DEFAULT_BATCH_SIZE = _training_cfg.get("batch_size", 10000)
 
-# 默认配置
-DEFAULT_DATA_DIR = Path("data/datasets/nanomind_tokenizer")
-DEFAULT_TEMPLATE_DIR = Path("output/qwen3_next_tokenizer")
-DEFAULT_OUTPUT_DIR = Path("output/tokenizer_36k")
-DEFAULT_VOCAB_SIZE = 36005  # 36000 BPE + 5 特殊 token
-
-# 特殊 token 定义
-SPECIAL_TOKENS = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
+logger = setup_logging()
 
 
 def load_template_tokenizer(template_dir: Path) -> PreTrainedTokenizerFast:
@@ -266,14 +276,16 @@ def postprocess_tokenizer_files(output_dir: Path) -> None:
     # 更新 vocab
     tokenizer_data["model"]["vocab"] = new_vocab
     logger.info(
-        f"  tokenizer.json: vocab 重新映射，{len(new_vocab)} 个 token (id 0-{max_vocab_id})"
+        f"  tokenizer.json: vocab 重新映射，{len(new_vocab)} 个 token "
+        f"(id 0-{max_vocab_id})"
     )
 
     # 更新 added_tokens 的 id
     for i, added_token in enumerate(tokenizer_data.get("added_tokens", [])):
         added_token["id"] = max_vocab_id + 1 + i
         logger.info(
-            f"  tokenizer.json: added_token '{added_token['content']}' id = {added_token['id']}"
+            f"  tokenizer.json: added_token '{added_token['content']}' "
+            f"id = {added_token['id']}"
         )
 
     # 保存修改后的 tokenizer.json
@@ -499,7 +511,8 @@ def main() -> int:
   python scripts/train_tokenizer.py --validate
 
   # 指定数据目录和输出目录
-  python scripts/train_tokenizer.py --data-dir /path/to/data --output-dir /path/to/output
+  python scripts/train_tokenizer.py \
+    --data-dir /path/to/data --output-dir /path/to/output
 
   # 自定义词表大小和批次大小
   python scripts/train_tokenizer.py --vocab-size 36005 --batch-size 5000
