@@ -2,6 +2,7 @@ import logging
 import sys
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from datatrove.executor import LocalPipelineExecutor
 from datatrove.pipeline.readers import ParquetReader
@@ -36,7 +37,7 @@ __all__ = [
 
 
 @lru_cache(maxsize=1)
-def get_default_config():
+def get_default_config() -> dict[str, Any]:
     processing = get_processing_config()
     return {
         "workers": processing.get("workers", DEFAULT_WORKERS),

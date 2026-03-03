@@ -1,7 +1,9 @@
+from collections.abc import Iterator
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from datatrove.data import Document
 from datatrove.pipeline.base import PipelineStep
 
 from .bucket_config import BucketConfig
@@ -20,7 +22,7 @@ class BucketPathWriter(PipelineStep):
         buckets: list[BucketConfig],
         compression: Compression = DEFAULT_COMPRESSION,
         max_file_size: int = DEFAULT_MAX_FILE_SIZE,
-    ):
+    ) -> None:
         super().__init__()
         self.output_dir = Path(output_dir)
         self.compression = compression
@@ -67,7 +69,7 @@ class BucketPathWriter(PipelineStep):
     def close(self) -> None:
         self._flush_all()
 
-    def run(self, data, rank: int = 0, world_size: int = 1) -> None:
+    def run(self, data: Iterator[Document], rank: int = 0, world_size: int = 1) -> None:
         self._rank = rank
 
         for doc in data:

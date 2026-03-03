@@ -1,5 +1,7 @@
 import hashlib
+from collections.abc import Iterator
 
+from datatrove.data import Document
 from datatrove.pipeline.base import PipelineStep
 
 from .bucket_config import BucketConfig, find_bucket_in_sorted
@@ -11,7 +13,7 @@ class ScoreFilter(PipelineStep):
     name = "Score Filter"
     type = "🎯 - FILTER"
 
-    def __init__(self, buckets: list[BucketConfig], random_seed: int = 42):
+    def __init__(self, buckets: list[BucketConfig], random_seed: int = 42) -> None:
         super().__init__()
         self.buckets = buckets
         self.random_seed = random_seed
@@ -23,7 +25,9 @@ class ScoreFilter(PipelineStep):
         h = int.from_bytes(hashlib.md5(data, usedforsecurity=False).digest()[:8], "big")
         return h / HASH_MAX_VALUE < rate
 
-    def run(self, data, rank: int = 0, world_size: int = 1):
+    def run(
+        self, data: Iterator[Document], rank: int = 0, world_size: int = 1
+    ) -> Iterator[Document]:
         for doc in data:
             score = doc.metadata.get("score")
             if score is None:
