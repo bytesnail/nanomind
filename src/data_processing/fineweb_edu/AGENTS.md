@@ -10,7 +10,7 @@ FineWeb-Edu 数据处理流水线：评分分桶重组 + 多语言支持。
 
 ```
 fineweb_edu/
-├── __init__.py      # 导出 9 个 API
+├── __init__.py      # 导出 8 个 API
 ├── __main__.py      # CLI: python -m src.data_processing.fineweb_edu
 ├── adapters.py      # fineweb_adapter, normalize_score
 └── reorganizer.py   # process_all_datasets, create_pipeline

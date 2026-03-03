@@ -14,16 +14,17 @@
 nanomind/
 ├── src/data_processing/         # 数据处理核心 [AGENTS.md]
 │   └── fineweb_edu/             # FineWeb-Edu 流水线 [AGENTS.md]
-├── scripts/                     # 工具脚本 (5 个, 3136 行)
-│   ├── trial_run.py             # 试运行 (≤5 文件 × 2000 行)
+├── scripts/                     # 工具脚本
+│   ├── trial_run.py             # 试运行
 │   ├── validate_output.py       # 输出验证
 │   ├── prepare_tokenizer_*.py   # Tokenizer 数据/模板准备
 │   └── train_tokenizer.py       # 36K BPE 训练
-├── tests/                       # pytest (9 文件)
-├── config/                      # YAML 配置 (4 文件)
+├── tests/                       # pytest
+├── config/                      # YAML 配置
 │   ├── dataset.yaml             # 数据集 + 评分桶
 │   ├── processing.yaml          # workers/tasks/compression
 │   ├── tokenizer_data.yaml      # Tokenizer 采样配置
+│   ├── tokenizer.yaml           # Tokenizer 训练配置
 │   └── paths.yaml               # 路径
 └── docs/                        # 设计文档 + KNOWLEDGE_BASE.md
 ```
@@ -33,6 +34,7 @@ nanomind/
 | 任务 | 位置 | 说明 |
 |------|------|------|
 | 添加数据集 | `config/dataset.yaml` | 评分桶、归一化、路径 |
+| Tokenizer 训练配置 | `config/tokenizer.yaml` | vocab_size、batch_size 等训练参数 |
 | Tokenizer 数据配比 | `config/tokenizer_data.yaml` | EN/ZH/Code/Math 采样数 |
 | 修改流水线参数 | `config/processing.yaml` | workers=32, tasks=2500 |
 | 数据适配器 | `src/data_processing/fineweb_edu/adapters.py` | normalize_score |
@@ -54,7 +56,8 @@ from src.data_processing import (
     process_all_datasets, process_single_dataset,
     # 工具
     merge_all_buckets, merge_bucket_files,
-    validate_all_buckets, validate_bucket, validate_file, print_report,
+    validate_all_buckets, validate_bucket, validate_file,
+    print_report,
 )
 ```
 
