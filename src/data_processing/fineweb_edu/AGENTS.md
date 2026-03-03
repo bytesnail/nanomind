@@ -1,5 +1,8 @@
 # AGENTS.md - fineweb_edu
 
+**Generated:** 2026-03-04
+**Commit:** f5aee16
+
 FineWeb-Edu 数据处理流水线：评分分桶重组 + 多语言支持。
 
 ## OVERVIEW

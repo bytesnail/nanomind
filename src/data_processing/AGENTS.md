@@ -1,5 +1,8 @@
 # AGENTS.md - data_processing
 
+**Generated:** 2026-03-04
+**Commit:** f5aee16
+
 数据处理核心模块：FineWeb-Edu 评分分桶 + Tokenizer 数据采样流水线。
 
 ## OVERVIEW

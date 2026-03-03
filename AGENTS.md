@@ -1,7 +1,7 @@
 # AGENTS.md - nanomind
 
-**Generated:** 2026-03-03
-**Commit:** 51d157e
+**Generated:** 2026-03-04
+**Commit:** f5aee16
 **Branch:** main
 
 ## OVERVIEW
