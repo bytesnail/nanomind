@@ -122,3 +122,7 @@ pytest tests/test_parquet_merger.py      # 合并
 ```
 
 Fixtures: `tests/conftest.py`
+
+## KNOWLEDGE BASE
+
+> 📚 **按需查阅**: `docs/KNOWLEDGE_BASE.md` 包含 Python 语法技巧、框架使用经验、项目架构知识、参数命令、最佳实践和问题修复记录。在开发过程中遇到具体技术问题时，可在此文档中搜索相关主题获取经验参考。

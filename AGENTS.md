@@ -149,3 +149,7 @@ Fixtures: `tests/conftest.py` (sample_document, sample_buckets, create_parquet)
 - **内存泄漏**: 启用 jemalloc (见 KNOWLEDGE_BASE.md 7.4)
 - **详细文档**: `docs/KNOWLEDGE_BASE.md` 包含完整经验教训
 - **无 CI/CD**: 手动运行测试和质量检查
+
+## KNOWLEDGE BASE
+
+> 📚 **按需查阅**: `docs/KNOWLEDGE_BASE.md` 包含项目全周期积累的技术知识、踩坑记录和最佳实践。在实现复杂功能或遇到问题时，可在此文档中搜索相关主题获取经验参考，无需通读全文。

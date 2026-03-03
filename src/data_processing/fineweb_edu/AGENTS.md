@@ -106,3 +106,7 @@ log_path = output_dir.parent / "logs" / log_name / "processing.log"
 pytest tests/test_fineweb_reorganizer.py  # 流水线
 pytest tests/test_adapters.py              # 适配器
 ```
+
+## KNOWLEDGE BASE
+
+> 📚 **按需查阅**: `docs/KNOWLEDGE_BASE.md` 包含 FineWeb-Edu 处理相关的经验教训、Datatrove 框架使用技巧、性能优化建议和常见问题解决方案。在流水线调试或优化时可参考对应章节。
