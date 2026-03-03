@@ -84,7 +84,8 @@ def merge_bucket_files(
         return [target_file]
 
     logger.info(
-        f"合并桶 {bucket_dir.name}: {len(parquet_files)} 个文件 -> 目标大小 {target_file_size / 1024 / 1024:.0f}MB"
+        f"合并桶 {bucket_dir.name}: {len(parquet_files)} 个文件 -> "
+        f"目标大小 {target_file_size / 1024 / 1024:.0f}MB"
     )
 
     if max_workers is None:

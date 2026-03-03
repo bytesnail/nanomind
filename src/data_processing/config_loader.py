@@ -40,6 +40,11 @@ def get_paths_config() -> dict[str, Any]:
     return _load_yaml("paths")
 
 
+@lru_cache(maxsize=1)
+def get_tokenizer_config() -> dict[str, Any]:
+    return _load_yaml("tokenizer")
+
+
 def get_dataset_configs() -> dict[str, dict[str, Any]]:
     return get_dataset_config_dict().get("datasets", {})
 
