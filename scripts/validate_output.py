@@ -1,15 +1,20 @@
+#!/usr/bin/env python3
+"""FineWeb-Edu 输出验证工具。
+
+验证分桶结果的正确性，支持单数据集和全部数据集验证。
+"""
+
+from __future__ import annotations
+
 import argparse
-import json
-import logging
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from scripts.utils import setup_logging, write_json
 from src.data_processing import print_report, validate_all_buckets
-from src.data_processing.config_loader import DEFAULT_LOG_FORMAT, get_dataset_configs
+from src.data_processing.config_loader import get_dataset_configs
 
-logging.basicConfig(level=logging.INFO, format=DEFAULT_LOG_FORMAT)
-logger = logging.getLogger(__name__)
+logger = setup_logging()
 
 
 def validate(
@@ -19,7 +24,7 @@ def validate(
     json_output: Path | None = None,
 ) -> int:
     if not input_dir.exists():
-        print(f"错误：输入目录不存在：{input_dir}", file=sys.stderr)
+        logger.error(f"输入目录不存在: {input_dir}")
         return 1
 
     results = validate_all_buckets(input_dir, dataset_key)
@@ -28,9 +33,8 @@ def validate(
     )
 
     if json_output:
-        with open(json_output, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"\n结果已保存到: {json_output}")
+        write_json(json_output, results)
+        logger.info(f"结果已保存到: {json_output}")
 
     return 0 if results["valid"] else 1
 
@@ -47,7 +51,7 @@ def validate_all(verbose: bool = False, json_output: Path | None = None) -> int:
         print(f"{'=' * 60}")
 
         if not input_dir.exists():
-            print(f"警告：输出目录不存在，跳过 {dataset_key}: {input_dir}")
+            logger.warning(f"输出目录不存在，跳过 {dataset_key}: {input_dir}")
             continue
 
         result = validate_all_buckets(input_dir, dataset_key)
@@ -57,9 +61,8 @@ def validate_all(verbose: bool = False, json_output: Path | None = None) -> int:
         print_report(result, verbose=verbose, title=f"验证报告 [{dataset_key}]")
 
     if json_output:
-        with open(json_output, "w", encoding="utf-8") as f:
-            json.dump(all_results, f, indent=2, ensure_ascii=False)
-        print(f"\n所有结果已保存到: {json_output}")
+        write_json(json_output, all_results)
+        logger.info(f"所有结果已保存到: {json_output}")
 
     return 0 if overall_valid else 1
 
