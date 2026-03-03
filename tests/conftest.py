@@ -1,6 +1,6 @@
-import pytest
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 from datatrove.data import Document
 
 from src.data_processing.bucket_config import BucketConfig

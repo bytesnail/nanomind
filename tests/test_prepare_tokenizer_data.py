@@ -10,9 +10,9 @@ import yaml
 from datatrove.data import Document
 
 from scripts.prepare_tokenizer_data import (
-    ALLOWED_LANGUAGES,
-    IndexFilter,
+    ALLOWED_LANGUAGE_EXTENSIONS,
     LANGUAGE_EXTENSIONS,
+    IndexFilter,
     LanguageTagger,
     SamplingConfig,
     SamplingInfo,
@@ -20,11 +20,11 @@ from scripts.prepare_tokenizer_data import (
     TokenizerDataConfig,
     TokenizerDataWriter,
     calculate_tasks,
-    create_row_index_adapter,
-    find_bucket_dir,
     compute_doc_hash,
     count_total_rows_fast,
+    create_row_index_adapter,
     determine_text_column,
+    find_bucket_dir,
     get_file_extension,
     load_config,
     precompute_sampling_indices,
@@ -293,13 +293,13 @@ class TestIndexFilter:
 
     def test_works_with_parquet_reader(self, tmp_path):
         from datatrove.pipeline.readers import ParquetReader
+
         from scripts.prepare_tokenizer_data import create_row_index_adapter
+
         # 创建测试文件
         _ = create_test_parquet(tmp_path, 10)
         adapter = create_row_index_adapter(
-            dataset_name="test_dataset",
-            bucket_name="test_bucket",
-            text_key="text"
+            dataset_name="test_dataset", bucket_name="test_bucket", text_key="text"
         )
         reader = ParquetReader(
             data_folder=str(tmp_path),
@@ -409,18 +409,16 @@ class TestIndexFilter:
 
 class TestCreateRowIndexAdapter:
     def test_unified_id_format(self):
-        """测试统一 id 格式: {dataset_name}/{bucket_name}/{filename}.parquet#{row_idx}"""
+        """测试统一 id 格式: {dataset_name}/{bucket_name}/{filename}#{row_idx}"""
         adapter = create_row_index_adapter(
-            dataset_name="fineweb_edu_en",
-            bucket_name="4.0",
-            text_key="text"
+            dataset_name="fineweb_edu_en", bucket_name="4.0", text_key="text"
         )
-        
+
         class MockReader:
             class data_folder:
                 # 使用相对于cwd的路径，避免暴露本地绝对路径
                 path = "data/datasets/fineweb/en/4.0"
-        
+
         result = adapter(
             MockReader(),
             {"text": "test"},
@@ -432,16 +430,14 @@ class TestCreateRowIndexAdapter:
     def test_id_format_with_github_code(self):
         """测试 github_code 数据集的统一 id 格式"""
         adapter = create_row_index_adapter(
-            dataset_name="github_code_2025",
-            bucket_name="10star",
-            text_key="content"
+            dataset_name="github_code_2025", bucket_name="10star", text_key="content"
         )
-        
+
         class MockReader:
             class data_folder:
                 # 使用相对于cwd的路径，避免暴露本地绝对路径
                 path = "data/datasets/github-code/2025-01/python"
-        
+
         result = adapter(
             MockReader(),
             {"content": "def hello(): pass"},
@@ -453,16 +449,14 @@ class TestCreateRowIndexAdapter:
     def test_original_id_ignored(self):
         """测试原始数据中的 id 字段被忽略，使用统一生成的 id"""
         adapter = create_row_index_adapter(
-            dataset_name="fineweb_edu_en",
-            bucket_name="4.0",
-            text_key="text"
+            dataset_name="fineweb_edu_en", bucket_name="4.0", text_key="text"
         )
-        
+
         class MockReader:
             class data_folder:
                 # 使用相对于cwd的路径，避免暴露本地绝对路径
                 path = "data/datasets/fineweb/en/4.0"
-        
+
         result = adapter(
             MockReader(),
             {"text": "test", "id": "data/CC-MAIN-2013-48/train.parquet#999"},
@@ -476,20 +470,20 @@ class TestCreateRowIndexAdapter:
         """测试 adapter 正确区分 file_path 和 parquet_path。
 
         对于 github_code 数据集：
-        - file_path 保留原始代码文件路径（如 "README.md"），供 LanguageTagger 使用
-        - parquet_path 存储 parquet 文件路径（如 "train_000.parquet"），供 IndexFilter 使用
+        - file_path 保留原始代码文件路径（如 "README.md"），
+          供 LanguageTagger 使用
+        - parquet_path 存储 parquet 文件路径（如 "train_000.parquet"），
+          供 IndexFilter 使用
         """
         adapter = create_row_index_adapter(
-            dataset_name="github_code_2025",
-            bucket_name="10star",
-            text_key="content"
+            dataset_name="github_code_2025", bucket_name="10star", text_key="content"
         )
-        
+
         class MockReader:
             class data_folder:
                 # 使用相对于cwd的路径，避免暴露本地绝对路径
                 path = "data/datasets/github-code/2025-01/python"
-        
+
         data = {
             "content": "def hello(): pass",
             "file_path": "README.md",  # 数据集自带的文件路径列
@@ -500,27 +494,31 @@ class TestCreateRowIndexAdapter:
 
         # 关键验证：file_path 保留原始文件路径，parquet_path 存储相对路径
         assert result["metadata"]["file_path"] == "README.md"
-        assert result["metadata"]["parquet_path"] == "data/datasets/github-code/2025-01/python/train-00000.parquet"
+        assert (
+            result["metadata"]["parquet_path"]
+            == "data/datasets/github-code/2025-01/python/train-00000.parquet"
+        )
         assert result["metadata"]["row_idx"] == 42
         assert result["metadata"]["repo_id"] == "github/user/repo"  # 其他列保留
 
     def test_row_idx_in_metadata(self):
         """测试 row_idx 被正确设置到 metadata 中。"""
         adapter = create_row_index_adapter(
-            dataset_name="fineweb_edu_en",
-            bucket_name="4.0",
-            text_key="text"
+            dataset_name="fineweb_edu_en", bucket_name="4.0", text_key="text"
         )
-        
+
         class MockReader:
             class data_folder:
                 # 使用相对于cwd的路径，避免暴露本地绝对路径
                 path = "data/datasets/fineweb/en/4.0"
-        
+
         result = adapter(MockReader(), {"text": "test"}, "00000.parquet", 123)
 
         assert result["metadata"]["row_idx"] == 123
-        assert result["metadata"]["parquet_path"] == "data/datasets/fineweb/en/4.0/00000.parquet"
+        assert (
+            result["metadata"]["parquet_path"]
+            == "data/datasets/fineweb/en/4.0/00000.parquet"
+        )
 
 
 class TestCountTotalRowsFast:
@@ -717,7 +715,7 @@ class TestLanguageTagger:
             id="doc_1",
             metadata={"file_path": "/path/to/script.py"},
         )
-        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS)
         result = list(tagger.run(iter([doc]), rank=0, world_size=1))
         assert len(result) == 1
         assert result[0].metadata["language"] == "python"
@@ -728,7 +726,7 @@ class TestLanguageTagger:
             id="doc_1",
             metadata={"file_path": "/path/to/main.cpp"},
         )
-        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS)
         result = list(tagger.run(iter([doc]), rank=0, world_size=1))
         assert result[0].metadata["language"] == "cpp"
 
@@ -738,7 +736,7 @@ class TestLanguageTagger:
             id="doc_1",
             metadata={"file_path": "/path/to/file.unknown"},
         )
-        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS)
         result = list(tagger.run(iter([doc]), rank=0, world_size=1))
         assert len(result) == 0
 
@@ -748,7 +746,7 @@ class TestLanguageTagger:
             id="doc_1",
             metadata={"file_path": ""},
         )
-        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS)
         result = list(tagger.run(iter([doc]), rank=0, world_size=1))
         assert len(result) == 0
 
@@ -758,7 +756,7 @@ class TestLanguageTagger:
             id="doc_1",
             metadata={"file_path": "/path/to/Makefile"},
         )
-        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS)
         result = list(tagger.run(iter([doc]), rank=0, world_size=1))
         assert len(result) == 0
 
@@ -769,7 +767,7 @@ class TestLanguageTagger:
             Document(text="jsx", id="3", metadata={"file_path": "App.jsx"}),
             Document(text="tsx", id="4", metadata={"file_path": "App.tsx"}),
         ]
-        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGES)
+        tagger = LanguageTagger(allowed_extensions=ALLOWED_LANGUAGE_EXTENSIONS)
         result = list(tagger.run(iter(docs), rank=0, world_size=1))
         assert len(result) == 4
         assert result[0].metadata["language"] == "javascript"
@@ -786,9 +784,9 @@ class TestLanguageTagger:
         assert LANGUAGE_EXTENSIONS[".cpp"] == "cpp"
 
     def test_allowed_languages_constant(self):
-        assert ".py" in ALLOWED_LANGUAGES
-        assert ".cpp" in ALLOWED_LANGUAGES
-        assert ".unknown" not in ALLOWED_LANGUAGES
+        assert ".py" in ALLOWED_LANGUAGE_EXTENSIONS
+        assert ".cpp" in ALLOWED_LANGUAGE_EXTENSIONS
+        assert ".unknown" not in ALLOWED_LANGUAGE_EXTENSIONS
 
     def test_includes_language_column_when_enabled(self, tmp_path):
         output_dir = tmp_path / "output"

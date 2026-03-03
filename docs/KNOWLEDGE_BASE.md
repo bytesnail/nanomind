@@ -293,7 +293,7 @@ new_tokenizer = template.train_new_from_iterator(
 # 自动继承: normalizer, pre_tokenizer, decoder, post_processor
 
 # 特殊 Token 定义
-SPECIAL_TOKENS = ["", "<|im_start|>", "<|im_end|>", "oliniht", ""]
+SPECIAL_TOKENS = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
 
 # tokenizer.json 后处理：vocab 重新映射
 special_set = set(SPECIAL_TOKENS)

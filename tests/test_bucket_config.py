@@ -31,10 +31,33 @@ class TestBucketConfig:
         assert "30%" in repr_str or "0.3" in repr_str
 
 
-class TestEnglishBuckets:
-    def test_get_all_bucket_configs(self):
-        buckets = get_all_bucket_configs("en")
-        assert len(buckets) == 4
+# 数据集配置：每种语言的特定属性
+DATASET_CONFIGS = {
+    "en": {
+        "bucket_count": 4,
+        "sampling_rates": [0.25, 0.50, 0.80, 1.0],
+    },
+    "zh": {
+        "bucket_count": 4,
+        "sampling_rates": [0.40, 0.60, 0.90, 1.0],
+    },
+}
+
+
+@pytest.fixture(params=["en", "zh"])
+def lang(request):
+    return request.param
+
+
+@pytest.fixture
+def dataset_config(lang):
+    return DATASET_CONFIGS[lang]
+
+
+class TestBuckets:
+    def test_get_all_bucket_configs(self, lang, dataset_config):
+        buckets = get_all_bucket_configs(lang)
+        assert len(buckets) == dataset_config["bucket_count"]
         assert buckets[0].name == "2.5"
         assert buckets[1].name == "3.0"
         assert buckets[2].name == "3.5"
@@ -53,61 +76,23 @@ class TestEnglishBuckets:
             (5.0, "4.0"),
         ],
     )
-    def test_find_bucket_for_score(self, score, expected):
-        b = find_bucket_for_score(score, "en")
+    def test_find_bucket_for_score(self, lang, score, expected):
+        b = find_bucket_for_score(score, lang)
         assert b is not None and b.name == expected
 
-    def test_find_bucket_for_score_out_of_range(self):
-        assert find_bucket_for_score(2.4, "en") is None
+    def test_find_bucket_for_score_out_of_range(self, lang):
+        assert find_bucket_for_score(2.4, lang) is None
 
-    def test_bucket_intervals_no_overlap(self):
-        b = find_bucket_for_score(3.0, "en")
+    def test_bucket_intervals_no_overlap(self, lang):
+        b = find_bucket_for_score(3.0, lang)
         assert b is not None and b.name == "3.0"
-        b = find_bucket_for_score(3.5, "en")
+        b = find_bucket_for_score(3.5, lang)
         assert b is not None and b.name == "3.5"
-        b = find_bucket_for_score(4.0, "en")
+        b = find_bucket_for_score(4.0, lang)
         assert b is not None and b.name == "4.0"
 
-    def test_sampling_rates(self):
-        buckets = get_all_bucket_configs("en")
-        assert buckets[0].sampling_rate == 0.25
-        assert buckets[1].sampling_rate == 0.50
-        assert buckets[2].sampling_rate == 0.80
-        assert buckets[3].sampling_rate == 1.0
-
-
-class TestChineseBuckets:
-    def test_get_all_bucket_configs(self):
-        buckets = get_all_bucket_configs("zh")
-        assert len(buckets) == 4
-        assert buckets[0].name == "2.5"
-        assert buckets[1].name == "3.0"
-        assert buckets[2].name == "3.5"
-        assert buckets[3].name == "4.0"
-
-    @pytest.mark.parametrize(
-        "score,expected",
-        [
-            (2.5, "2.5"),
-            (2.9, "2.5"),
-            (3.0, "3.0"),
-            (3.4, "3.0"),
-            (3.5, "3.5"),
-            (3.9, "3.5"),
-            (4.0, "4.0"),
-            (5.0, "4.0"),
-        ],
-    )
-    def test_find_bucket_for_score(self, score, expected):
-        b = find_bucket_for_score(score, "zh")
-        assert b is not None and b.name == expected
-
-    def test_find_bucket_for_score_out_of_range(self):
-        assert find_bucket_for_score(2.4, "zh") is None
-
-    def test_sampling_rates(self):
-        buckets = get_all_bucket_configs("zh")
-        assert buckets[0].sampling_rate == 0.40
-        assert buckets[1].sampling_rate == 0.60
-        assert buckets[2].sampling_rate == 0.90
-        assert buckets[3].sampling_rate == 1.0
+    def test_sampling_rates(self, lang, dataset_config):
+        buckets = get_all_bucket_configs(lang)
+        expected_rates = dataset_config["sampling_rates"]
+        for i, expected_rate in enumerate(expected_rates):
+            assert buckets[i].sampling_rate == expected_rate
