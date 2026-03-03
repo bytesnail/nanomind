@@ -45,6 +45,7 @@ DEFAULT_VOCAB_SIZE = 36005  # 36000 BPE + 5 特殊 token
 # 特殊 token 定义
 SPECIAL_TOKENS = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
 
+
 def load_template_tokenizer(template_dir: Path) -> PreTrainedTokenizerFast:
     """从本地目录加载模板 tokenizer。
 
@@ -243,8 +244,11 @@ def postprocess_tokenizer_files(output_dir: Path) -> None:
     special_token_set = set(SPECIAL_TOKENS)
 
     # 过滤掉特殊 token，保留其他 token
-    filtered_tokens = [(token, old_id) for token, old_id in vocab.items()
-                       if token not in special_token_set]
+    filtered_tokens = [
+        (token, old_id)
+        for token, old_id in vocab.items()
+        if token not in special_token_set
+    ]
 
     # 按原始 id 排序以保持顺序
     filtered_tokens.sort(key=lambda x: x[1])
@@ -261,12 +265,16 @@ def postprocess_tokenizer_files(output_dir: Path) -> None:
 
     # 更新 vocab
     tokenizer_data["model"]["vocab"] = new_vocab
-    logger.info(f"  tokenizer.json: vocab 重新映射，{len(new_vocab)} 个 token (id 0-{max_vocab_id})")
+    logger.info(
+        f"  tokenizer.json: vocab 重新映射，{len(new_vocab)} 个 token (id 0-{max_vocab_id})"
+    )
 
     # 更新 added_tokens 的 id
     for i, added_token in enumerate(tokenizer_data.get("added_tokens", [])):
         added_token["id"] = max_vocab_id + 1 + i
-        logger.info(f"  tokenizer.json: added_token '{added_token['content']}' id = {added_token['id']}")
+        logger.info(
+            f"  tokenizer.json: added_token '{added_token['content']}' id = {added_token['id']}"
+        )
 
     # 保存修改后的 tokenizer.json
     with open(tokenizer_path, "w", encoding="utf-8") as f:

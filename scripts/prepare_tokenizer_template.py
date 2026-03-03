@@ -96,7 +96,9 @@ def _create_modified_tokenizer_json(tokenizer_data: dict) -> dict:
     return tokenizer_data
 
 
-def prepare_tokenizer_template(model_name: str, output_dir: Path, modified_dir: Path) -> None:
+def prepare_tokenizer_template(
+    model_name: str, output_dir: Path, modified_dir: Path
+) -> None:
     """从指定模型下载并保存 tokenizer 模板。
 
     Args:

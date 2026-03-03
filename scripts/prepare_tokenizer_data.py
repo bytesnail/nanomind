@@ -444,7 +444,7 @@ class IndexFilter(PipelineStep):
             # 使用 parquet_path 匹配索引（adapter中已设置）
             parquet_path = doc.metadata.get("parquet_path", "")
             row_idx = doc.metadata.get("row_idx")
-            
+
             if parquet_path in self.indices and row_idx in self.indices[parquet_path]:
                 self.stat_update("passed", value=1)
                 yield doc
@@ -703,7 +703,7 @@ def process_bucket_streaming(
     buffer_size: int = DEFAULT_BATCH_SIZE,
 ) -> int:
     """处理单个桶的数据，使用采样模式。
-    
+
     对于github_code数据集，会先根据file_path过滤编程语言，再进行采样。
     """
     if not files:
@@ -751,12 +751,12 @@ def _process_sampled(
     text_column: str,
 ) -> None:
     """采样处理流程。
-    
+
     对于github_code数据集：
     1. 先读取文件内容，根据file_path过滤出目标编程语言的文档
     2. 对过滤后的文档计算采样索引
     3. 按索引采样并输出
-    
+
     对于其他数据集：
     1. 直接计算采样索引
     2. 按索引采样并输出
