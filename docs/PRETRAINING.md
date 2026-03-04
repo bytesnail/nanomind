@@ -1,43 +1,55 @@
 # Nanomind 预训练设计文档
 
-**文档版本**: v2.0  
-**更新日期**: 2026-03-04  
-**适用范围**: nanomind ~1.26B MoE 模型预训练
+> ⚠️ **文档状态**: 设计草稿 v0.1 (2026-03-04)  
+> 🚧 本文档描述计划中的预训练系统架构，**预训练代码尚未实现**。  
+> 具体实现进度见 [实施路线图](#7-实施路线图)。
+
+---
+
+## 实现状态索引
+
+| 模块 | 状态 | 参考文档 |
+|------|------|----------|
+| Tokenizer 训练 | ✅ 已实现 | [Tokenizer 训练设计](tokenizer_training_design.md) |
+| FineWeb-Edu 数据重组 | ✅ 已实现 | [FineWeb-Edu 数据重组设计](fineweb_edu_data_reorganization_design.md) |
+| 预训练代码 | 🚧 设计中 | 本文档 |
+
+**本文档范围**: 预训练系统设计（模型架构、训练配置、实施计划）
 
 ---
 
 ## 目录
 
-1. [项目概述](#一项目概述)
+1. [项目概述](#1-项目概述)
    - 1.1 [项目目标](#11-项目目标)
    - 1.2 [设计原则](#12-设计原则)
    - 1.3 [技术栈](#13-技术栈)
    - 1.4 [Modular Transformers 简介](#14-modular-transformers-简介)
-2. [模型架构设计](#二模型架构设计)
+2. [模型架构设计](#2-模型架构设计)
    - 2.1 [参考架构：Qwen3-Next](#21-参考架构qwen3-next)
    - 2.2 [缩放设计参考](#22-缩放设计参考)
    - 2.3 [nanomind 架构配置](#23-nanomind-架构配置)
    - 2.4 [参数量明细](#24-参数量明细)
-3. [Tokenizer 配置](#三tokenizer-配置)
-4. [数据预处理](#四数据预处理)
-5. [训练配置](#五训练配置)
+3. [Tokenizer 配置](#3-tokenizer-配置)
+4. [数据预处理](#4-数据预处理)
+5. [训练配置](#5-训练配置)
    - 5.1 [Chinchilla Scaling Law](#51-chinchilla-scaling-law)
    - 5.2 [超参数配置](#52-超参数配置)
    - 5.3 [DeepSpeed 配置](#53-deepspeed-配置)
    - 5.4 [显存估算](#54-显存估算)
    - 5.5 [硬件特定配置](#55-硬件特定配置)
    - 5.6 [Accelerate 配置](#56-accelerate-配置)
-6. [训练基础设施](#六训练基础设施)
+6. [训练基础设施](#6-训练基础设施)
    - 6.1 [启动命令](#61-启动命令)
    - 6.2 [WandB 集成](#62-wandb-集成)
    - 6.3 [断点续训](#63-断点续训)
    - 6.4 [训练脚本示例](#64-训练脚本示例)
-7. [实施路线图](#七实施路线图)
-8. [附录：快速参考](#八附录快速参考)
+7. [实施路线图](#7-实施路线图)
+8. [附录：快速参考](#8-附录快速参考)
 
 ---
 
-## 一、项目概述
+## 1. 项目概述
 
 ### 1.1 项目目标
 
@@ -66,7 +78,7 @@
 
 | 组件 | 技术选择 |
 |------|----------|
-| 模型框架 | Hugging Face Transformers + [Modular Transformers](#134-modular-transformers-简介) |
+| 模型框架 | Hugging Face Transformers + [Modular Transformers](#14-modular-transformers-简介) |
 | 训练加速 | DeepSpeed ZeRO-2/3 + Accelerate |
 | 数据流水线 | Datatrove |
 | 实验跟踪 | Weights & Biases |
@@ -103,7 +115,7 @@ python utils/modular_model_converter.py nanomind
 
 ---
 
-## 二、模型架构设计
+## 2. 模型架构设计
 
 ### 2.1 参考架构：Qwen3-Next
 
@@ -133,7 +145,7 @@ python utils/modular_model_converter.py nanomind
 ### 2.3 nanomind 架构配置
 
 ```yaml
-# config/model/nanomind_1b_moe.yaml
+# config/model/nanomind_1b_moe.yaml (规划中)
 model:
   model_type: "qwen3_next_moe"
   architectures: ["Qwen3NextMoeForCausalLM"]
@@ -176,67 +188,67 @@ model:
   rms_norm_eps: 1.0e-6
   tie_word_embeddings: true
   torch_dtype: "bfloat16"
+  
+  # 特殊 Token ID 配置
+  pad_token_id: 36000  # <|endoftext|>
+  eos_token_id: 36002  # <|im_end|>
+  bos_token_id: null
 ```
 
 ### 2.4 参数量明细
 
-| 组件 | 参数量 | 占比 |
-|------|--------|------|
-| Embedding (tied) | 41.5M | 3.3% |
-| Gated Attention (5层) | 36.1M | 2.9% |
-| Gated DeltaNet (15层) | 161.5M | 12.8% |
-| MoE 专家 (20层 × 33专家) | ~1,023M | 81.2% |
-| LayerNorm + 其他 | 0.1M | <0.1% |
-| **总计** | **~1,262M** | 100% |
-| **激活参数** | **~363M** | **28.8%** |
+| 组件 | 计算公式 | 参数量 | 占比 |
+|------|----------|--------|------|
+| Embedding (tied) | `vocab_size × hidden_size` | 41.5M | 3.3% |
+| Gated Attention (5层) | `5 × hidden_size² × 4` | 36.1M | 2.9% |
+| Gated DeltaNet (15层) | `15 × (k_heads × k_dim + v_heads × v_dim)` | 161.5M | 12.8% |
+| MoE 专家 (20层 × 33专家) | `20 × 33 × (3 × hidden_size × moe_intermediate)` | ~1,023M | 81.2% |
+| LayerNorm + 其他 | - | 0.1M | <0.1% |
+| **总计** | - | **~1,262M** | 100% |
+| **激活参数** | - | **~363M** | **28.8%** |
 
 ---
 
-## 三、Tokenizer 配置
+## 3. Tokenizer 配置
 
-### 3.1 Tokenizer 规格
+> 📚 **详细实现** 见 [Tokenizer 训练设计文档](tokenizer_training_design.md)
 
+本节仅列出预训练相关的关键规格：
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| **词表大小** | 36005 | 36000 BPE + 5 特殊 token |
+| **pad_token_id** | 36000 | `<\|endoftext\|>` |
+| **eos_token_id** | 36002 | `<\|im_end\|>` |
+| **bos_token_id** | null | 不使用 BOS |
+
+**特殊 Token 列表：**
 ```yaml
-vocab_size: 36005
-
-special_tokens:
-  - "<|endoftext|>"    # ID: 36000, padding + 文本结束
-  - "<|im_start|>"     # ID: 36001, 对话开始
-  - "<|im_end|>"       # ID: 36002, 对话结束
-  - "<think>"          # ID: 36003, 思考开始 (CoT)
-  - "</think>"         # ID: 36004, 思考结束 (CoT)
-```
-
-### 3.2 模型集成
-
-```python
-from transformers import AutoConfig
-
-config = AutoConfig.for_model(
-    "qwen3",
-    vocab_size=36005,
-    pad_token_id=36000,
-    eos_token_id=36000,
-    bos_token_id=None,
-)
+- "<|endoftext|>"    # ID: 36000, padding
+- "<|im_start|>"     # ID: 36001, 对话开始
+- "<|im_end|>"       # ID: 36002, 对话结束 / eos
+- "<think>"          # ID: 36003, 思考开始 (CoT)
+- "</think>"         # ID: 36004, 思考结束 (CoT)
 ```
 
 ---
 
-## 四、数据预处理
+## 4. 数据预处理
 
-### 4.1 数据源
+> 📚 **详细实现** 见 [FineWeb-Edu 数据重组设计文档](fineweb_edu_data_reorganization_design.md)
 
-| 数据集 | 路径 | 类型 | 质量分桶 |
-|--------|------|------|----------|
-| FineWeb-EN | fineweb/en | 英文教育文本 | 2.5/3.0/3.5/4.0 |
-| FineWeb-ZH | fineweb/zh | 中文教育文本 | 2.5/3.0/3.5/4.0 |
-| GitHub Code | github-code-2025 | 代码 | stars 过滤 |
-| Nemotron Math | Nemotron-CC-Math | 数学文本 | quality 分数 |
+### 4.1 数据源概要
+
+| 数据集 | 类型 | 质量分桶 |
+|--------|------|----------|
+| FineWeb-EN | 英文教育文本 | 2.5/3.0/3.5/4.0 |
+| FineWeb-ZH | 中文教育文本 | 2.5/3.0/3.5/4.0 |
+| GitHub Code | 代码 | stars 过滤 |
+| Nemotron Math | 数学文本 | quality 分数 |
 
 ### 4.2 两层分桶策略
 
-#### 第一层：Token 长度分桶
+**第一层：Token 长度分桶**
 
 | 长度桶 | 范围 | 用途 |
 |--------|------|------|
@@ -245,43 +257,9 @@ config = AutoConfig.for_model(
 | long | (1024, 2048] | 预训练后期 |
 | xl | (2048, 4096] | 长上下文训练 |
 
-```python
-def get_length_bucket(token_count: int) -> str:
-    if token_count <= 512:
-        return "short"
-    elif token_count <= 1024:
-        return "medium"
-    elif token_count <= 2048:
-        return "long"
-    else:
-        return "xl"
-```
+**第二层：质量分桶** - 详见数据重组设计文档
 
-#### 第二层：质量分桶
-
-| 数据集 | 质量指标 | 分桶策略 |
-|--------|----------|----------|
-| FineWeb | edu_score | 2.5/3.0/3.5/4.0 |
-| GitHub Code | stars | above-2-stars / below-2-stars |
-| Nemotron Math | quality_score | 3 / 4plus / 4plus_MIND |
-
-### 4.3 输出目录结构
-
-```
-data/datasets/nanomind_pretrain/
-├── short/
-│   ├── fineweb_en/2.5/, 3.0/, 3.5/, 4.0/
-│   ├── fineweb_zh/2.5/, 3.0/, 3.5/, 4.0/
-│   ├── github_code/
-│   └── nemotron_math/
-├── medium/
-├── long/
-└── xl/
-```
-
-### 4.4 数据配比 (Phase 1)
-
-**预训练第一阶段**（≤512 tokens）：
+### 4.3 数据配比 (Phase 1)
 
 | 数据源 | 文档数 | 占比 | 质量配比 |
 |--------|--------|------|----------|
@@ -291,17 +269,9 @@ data/datasets/nanomind_pretrain/
 | Nemotron Math | 420K | 14% | 4plus(50%)/4plus_MIND(25%)/3(25%) |
 | **总计** | **3M** | **100%** | ~900M tokens |
 
-### 4.5 扩展计划
-
-| 阶段 | 数据范围 | Token 数 | 目标 |
-|------|----------|----------|------|
-| Phase 1 | ≤512 | ~1B | 跑通流程 |
-| Phase 2 | ≤1024 | ~3B | 增加中长文本 |
-| Phase 3 | ≤4096 | ~10B | Chinchilla optimal |
-
 ---
 
-## 五、训练配置
+## 5. 训练配置
 
 ### 5.1 Chinchilla Scaling Law
 
@@ -309,7 +279,7 @@ data/datasets/nanomind_pretrain/
 
 1B 参数模型的 Chinchilla optimal 训练需要约 **20B tokens**。
 
-**学习率估算公式：**
+**学习率估算公式**（经验公式，来源：Chinchilla 论文扩展研究）：
 ```python
 def estimate_lr(model_size_in_billions: float) -> float:
     """基于模型大小估算最优学习率"""
@@ -335,7 +305,7 @@ def scale_lr_for_batch_size(base_lr: float, base_bs: int, target_bs: int) -> flo
 ### 5.2 超参数配置
 
 ```yaml
-# config/training/base.yaml
+# config/training/base.yaml (规划中)
 training:
   num_train_epochs: 1
   
@@ -376,6 +346,7 @@ training:
 #### ZeRO-2 (推荐，速度优先)
 
 ```json
+// config/deepspeed/zero2.json (规划中)
 {
   "fp16": {
     "enabled": true,
@@ -411,6 +382,7 @@ training:
 #### ZeRO-3 (显存受限)
 
 ```json
+// config/deepspeed/zero3.json (规划中)
 {
   "fp16": {
     "enabled": true,
@@ -458,7 +430,7 @@ training:
 | FP32 | ✅ | ✅ CUDA Cores | 基准 |
 
 ```yaml
-# 2080 Ti 专用配置
+# 2080 Ti 专用配置 (规划中)
 training:
   bf16: false          # 禁用 BF16
   fp16: true           # 启用 FP16
@@ -473,7 +445,7 @@ training:
 ### 5.6 Accelerate 配置
 
 ```yaml
-# config/accelerate/deepspeed_zero2.yaml
+# config/accelerate/deepspeed_zero2.yaml (规划中)
 compute_environment: LOCAL_MACHINE
 distributed_type: DEEPSPEED
 num_processes: 2
@@ -490,18 +462,20 @@ deepspeed_config:
 
 ---
 
-## 六、训练基础设施
+## 6. 训练基础设施
 
 ### 6.1 启动命令
 
+> 🚧 以下命令基于设计配置，相关脚本尚未实现
+
 ```bash
-# 使用 Accelerate (推荐)
+# 使用 Accelerate (规划中)
 accelerate launch \
   --config_file config/accelerate/deepspeed_zero2.yaml \
   scripts/train_nanomind.py \
   --config config/training/phase1_short.yaml
 
-# 或使用 torchrun
+# 或使用 torchrun (规划中)
 torchrun \
   --nnodes=1 --nproc_per_node=2 \
   scripts/train_nanomind.py \
@@ -548,9 +522,11 @@ trainer.train(resume_from_checkpoint="output/checkpoint-1000")
 
 ### 6.4 训练脚本示例
 
+> 🚧 **伪代码示例**：展示预期架构，实际脚本 `scripts/train_nanomind.py` 尚未实现
+
 ```python
 #!/usr/bin/env python3
-"""nanomind 预训练脚本"""
+"""nanomind 预训练脚本 - 设计草案"""
 
 import argparse
 from pathlib import Path
@@ -634,7 +610,7 @@ if __name__ == "__main__":
 
 ---
 
-## 七、实施路线图
+## 7. 实施路线图
 
 ### 7.1 阶段规划
 
@@ -645,10 +621,10 @@ if __name__ == "__main__":
 - [ ] 搭建 WandB 项目
 
 #### Phase 1: 数据预处理 (2-3 天)
-- [ ] 运行 Token 长度计算
-- [ ] 执行两层分桶聚合
-- [ ] 验证输出数据质量
-- [ ] 生成 Phase 1 数据集
+- [x] ~~运行 Token 长度计算~~ ✅ 已实现
+- [x] ~~执行两层分桶聚合~~ ✅ 已实现
+- [x] ~~验证输出数据质量~~ ✅ 已实现
+- [ ] 生成 Phase 1 数据集（按长度分桶）
 
 #### Phase 2: 流程验证 (1-2 天)
 - [ ] 小规模试验（1% 数据）
@@ -676,7 +652,7 @@ if __name__ == "__main__":
 
 ---
 
-## 八、附录：快速参考
+## 8. 附录：快速参考
 
 ### 8.1 项目目录结构
 
@@ -684,83 +660,58 @@ if __name__ == "__main__":
 nanomind/
 ├── config/
 │   ├── model/
-│   │   └── nanomind_1b_moe.yaml      # 模型架构配置
+│   │   └── nanomind_1b_moe.yaml      # 🚧 规划中
 │   ├── training/
-│   │   ├── base.yaml                 # 基础训练配置
-│   │   ├── phase1_short.yaml         # Phase 1: ≤512 tokens
-│   │   ├── phase2_medium.yaml        # Phase 2: ≤1024 tokens
-│   │   └── phase3_long.yaml          # Phase 3: ≤4096 tokens
+│   │   ├── base.yaml                 # 🚧 规划中
+│   │   ├── phase1_short.yaml         # 🚧 规划中
+│   │   ├── phase2_medium.yaml        # 🚧 规划中
+│   │   └── phase3_long.yaml          # 🚧 规划中
 │   ├── deepspeed/
-│   │   ├── zero2.json                # ZeRO-2 配置
-│   │   └── zero3.json                # ZeRO-3 配置
+│   │   ├── zero2.json                # 🚧 规划中
+│   │   └── zero3.json                # 🚧 规划中
 │   └── accelerate/
-│       └── deepspeed_zero2.yaml      # Accelerate 配置
+│       └── deepspeed_zero2.yaml      # 🚧 规划中
 ├── scripts/
-│   ├── train_nanomind.py             # 主训练脚本
-│   ├── calculate_token_lengths.py    # Token 长度计算
-│   ├── bucket_documents.py           # 文档分桶
-│   └── validate_pretrain_data.py     # 数据验证
+│   ├── train_nanomind.py             # 🚧 规划中
+│   ├── calculate_token_lengths.py    # 🚧 规划中
+│   ├── bucket_documents.py           # 🚧 规划中
+│   └── validate_pretrain_data.py     # 🚧 规划中
 ├── src/
-│   ├── data_processing/              # 数据处理模块
-│   └── training/                     # 训练工具模块
+│   ├── data_processing/              # ✅ 已实现
+│   └── training/                     # 🚧 规划中
 ├── docs/
-│   └── PRETRAINING.md                # 本文档
+│   ├── PRETRAINING.md                # 📍 本文档
+│   ├── tokenizer_training_design.md  # ✅ 已完成
+│   └── fineweb_edu_data_reorganization_design.md  # ✅ 已完成
 └── output/
-    ├── tokenizer_36k/                # Tokenizer
-    └── nanomind_pretrain/            # 训练输出
+    ├── tokenizer_36k/                # ✅ 已生成
+    └── nanomind_pretrain/            # 🚧 规划中
 ```
 
 ### 8.2 配置文件清单
 
-| 文件 | 用途 | 路径 |
-|------|------|------|
-| `nanomind_1b_moe.yaml` | 模型架构 | `config/model/` |
-| `phase1_short.yaml` | Phase 1 训练 | `config/training/` |
-| `zero2.json` | ZeRO-2 配置 | `config/deepspeed/` |
-| `zero3.json` | ZeRO-3 配置 | `config/deepspeed/` |
-| `deepspeed_zero2.yaml` | Accelerate | `config/accelerate/` |
+| 文件 | 用途 | 路径 | 状态 |
+|------|------|------|------|
+| `nanomind_1b_moe.yaml` | 模型架构 | `config/model/` | 🚧 规划中 |
+| `phase1_short.yaml` | Phase 1 训练 | `config/training/` | 🚧 规划中 |
+| `zero2.json` | ZeRO-2 配置 | `config/deepspeed/` | 🚧 规划中 |
+| `zero3.json` | ZeRO-3 配置 | `config/deepspeed/` | 🚧 规划中 |
+| `deepspeed_zero2.yaml` | Accelerate | `config/accelerate/` | 🚧 规划中 |
 
-### 8.3 关键命令
-
-```bash
-# 估计内存
-deepspeed --num_gpus=2 scripts/train.py --estimate_memory
-
-# 测试配置
-python scripts/train.py --config configs/nanomind_1b.yaml --dry_run
-
-# 单 GPU 测试
-CUDA_VISIBLE_DEVICES=0 python scripts/train.py --config configs/test.yaml
-
-# 多 GPU 训练
-accelerate launch --config_file configs/accelerate_config.yaml scripts/train.py
-```
-
-### 8.4 模型配置速查
-
-```python
-# nanomind-1.2B MoE 配置
-config = {
-    "hidden_size": 1152,
-    "num_hidden_layers": 20,
-    "num_attention_heads": 8,
-    "num_key_value_heads": 2,
-    "num_experts": 32,
-    "num_experts_per_tok": 3,
-    "num_shared_experts": 1,
-    "moe_intermediate_size": 448,
-    "total_params": "~1.26B",
-    "active_params": "~363M",
-    "active_ratio": "~28.8%",
-}
-```
-
-### 8.5 参考文献
+### 8.3 参考文献
 
 1. Hoffmann et al. (2022). Training Compute-Optimal Large Language Models. (Chinchilla)
 2. Qwen3 Technical Report
 3. DeepSpeed Documentation: https://www.deepspeed.ai/
 4. Hugging Face Transformers Documentation
+
+---
+
+## 文档更新记录
+
+| 版本 | 日期 | 更新内容 |
+|------|------|----------|
+| v0.1 | 2026-03-04 | 初始设计稿，添加实现状态标记，修复 Token ID 冲突 |
 
 ---
 
