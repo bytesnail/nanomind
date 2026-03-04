@@ -5,8 +5,10 @@ description = "深度学习、大语言模型学习与试验"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "accelerate>=1.0.0",
     "datasets>=4.5.0",
     "datatrove[all]>=0.8.0",
+    "deepspeed>=0.15.0",
     "matplotlib>=3.10.8",
     "pybloom-live>=4.0.0",
     "sentencepiece>=0.2.1",
@@ -15,6 +17,7 @@ dependencies = [
     "torchvision>=0.25.0",
     "tqdm>=4.67.3",
     "transformers>=5.2.0",
+    "wandb>=0.19.0",
 ]
 
 [dependency-groups]

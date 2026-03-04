@@ -4,6 +4,8 @@
 > 🚧 本文档描述计划中的预训练系统架构，**预训练代码尚未实现**。  
 > 具体实现进度见 [实施路线图](#7-实施路线图)。
 
+> 📦 **依赖要求**: 预训练需要额外的依赖包，详见 [1.3 技术栈](#13-技术栈)
+
 ---
 
 ## 实现状态索引
@@ -76,13 +78,20 @@
 
 ### 1.3 技术栈
 
-| 组件 | 技术选择 |
-|------|----------|
-| 模型框架 | Hugging Face Transformers + [Modular Transformers](#14-modular-transformers-简介) |
-| 训练加速 | DeepSpeed ZeRO-2/3 + Accelerate |
-| 数据流水线 | Datatrove |
-| 实验跟踪 | Weights & Biases |
-| 配置管理 | YAML |
+| 组件 | 技术选择 | 安装命令 |
+|------|----------|----------|
+| 模型框架 | Hugging Face Transformers + [Modular Transformers](#14-modular-transformers-简介) | `pip install transformers>=5.2.0` |
+| 训练加速 | DeepSpeed ZeRO-2/3 + Accelerate | `pip install deepspeed>=0.15.0 accelerate>=1.0.0` |
+| 数据流水线 | Datatrove (数据处理) / HuggingFace Datasets (训练) | `pip install datasets>=4.5.0` |
+| 实验跟踪 | Weights & Biases | `pip install wandb>=0.19.0` |
+| 配置管理 | YAML | 内置支持 |
+
+**安装所有预训练依赖**:
+```bash
+uv add deepspeed accelerate wandb --no-sync
+uv pip compile pyproject.toml -o requirements.txt
+uv pip install -r requirements.txt
+```
 
 ### 1.4 Modular Transformers 简介
 
@@ -108,10 +117,8 @@ class NanomindForCausalLM(Qwen3NextMoeForCausalLM):
     config_class = NanomindConfig
 ```
 
-**生成模型文件：**
-```bash
-python utils/modular_model_converter.py nanomind
-```
+**生成模型文件**：
+参考: [HF Modular Transformers 文档](https://huggingface.co/docs/transformers/modular_transformers)
 
 ---
 
@@ -140,7 +147,9 @@ python utils/modular_model_converter.py nanomind
 | 隐藏维度 | 2048 | **1152** | ~1/1.8 |
 | 层数 | 48 | **20** | 5/12 |
 | 专家总数 | 512 | **32** | 1/16 |
-| 激活专家 | 10+1 | **3+1** | ~1/3 |
+| 激活专家 | 10+1 | **3+1**¹ | ~1/3 |
+
+¹ **3+1 专家机制**: 3个路由专家（由路由器动态选择）+ 1个共享专家（始终激活）
 
 ### 2.3 nanomind 架构配置
 
@@ -169,9 +178,8 @@ model:
   linear_key_head_dim: 128
   linear_value_head_dim: 128
   
-  # 混合布局: 15层 DeltaNet + 5层 Attention
-  layer_types: ["linear_attention", "linear_attention", "linear_attention", "full_attention"]
-  full_attention_interval: 4
+  # 混合布局: 15层 DeltaNet + 5层 Attention (每4层一个Attention层)
+  full_attention_layer_indexes: [3, 7, 11, 15, 19]  # 0-based 索引
   
   # MoE 配置 (~28.5% 激活占比)
   num_experts: 32
@@ -222,13 +230,15 @@ model:
 | **eos_token_id** | 36002 | `<\|im_end\|>` |
 | **bos_token_id** | null | 不使用 BOS |
 
-**特殊 Token 列表：**
-```yaml
-- "<|endoftext|>"    # ID: 36000, padding
-- "<|im_start|>"     # ID: 36001, 对话开始
-- "<|im_end|>"       # ID: 36002, 对话结束 / eos
-- "<think>"          # ID: 36003, 思考开始 (CoT)
-- "</think>"         # ID: 36004, 思考结束 (CoT)
+**特殊 Token 列表** (定义在 `src/constants.py`):
+```python
+SPECIAL_TOKENS = [
+    "<|endoftext|>",   # ID: 36000, padding
+    "<|im_start|>",    # ID: 36001, 对话开始
+    "<|im_end|>",      # ID: 36002, 对话结束 / eos
+    "<think>",         # ID: 36003, 思考开始 (CoT)
+    "</think>",        # ID: 36004, 思考结束 (CoT)
+]
 ```
 
 ---
@@ -236,6 +246,10 @@ model:
 ## 4. 数据预处理
 
 > 📚 **详细实现** 见 [FineWeb-Edu 数据重组设计文档](fineweb_edu_data_reorganization_design.md)
+
+**数据加载方式**:
+- **预处理阶段**: 使用 Datatrove Pipeline 进行数据分桶和过滤
+- **训练阶段**: 使用 HuggingFace `datasets` 库加载处理后的 Parquet 文件
 
 ### 4.1 数据源概要
 
@@ -288,8 +302,9 @@ def estimate_lr(model_size_in_billions: float) -> float:
     return base_lr * scale_factor
 
 # nanomind ~1.26B
-lr = estimate_lr(1.26)  # ~2.67e-4
+lr = estimate_lr(1.26)  # ~2.67e-4 (理论值)
 
+# 实际使用略高的学习率以加速实验收敛，可根据训练稳定性调整
 # Batch size 调整 (平方根缩放规则)
 def scale_lr_for_batch_size(base_lr: float, base_bs: int, target_bs: int) -> float:
     """根据 batch size 调整学习率"""
@@ -298,9 +313,11 @@ def scale_lr_for_batch_size(base_lr: float, base_bs: int, target_bs: int) -> flo
 
 | 阶段 | Tokens | 说明 |
 |------|--------|------|
-| 保守起步 | 1-3B | 验证流程 |
-| 标准训练 | 10-20B | 接近 optimal |
-| 过训练 | 30B+ | 小模型可受益 |
+| 保守起步 | 1-3B | 验证流程（约 1-2 tokens/param） |
+| 标准训练 | 10-20B | 接近 optimal（约 8-16 tokens/param） |
+| 过训练 | 30B+ | 小模型可受益（约 24+ tokens/param） |
+
+**Chinchilla Optimal**: ~20 tokens/parameter 对 1.26B 模型约需 **25B tokens**
 
 ### 5.2 超参数配置
 
@@ -432,14 +449,14 @@ training:
 ```yaml
 # 2080 Ti 专用配置 (规划中)
 training:
-  bf16: false          # 禁用 BF16
+  bf16: false          # 禁用 BF16 (2080 Ti 不支持原生 BF16 加速)
   fp16: true           # 启用 FP16
-  fp16_opt_level: "O1"
-  
+  fp16_backend: "auto" # 或 "amp" 使用 PyTorch Native AMP
+
   # FP16 稳定性优化
   gradient_accumulation_steps: 16
   max_grad_norm: 1.0
-  learning_rate: 2.0e-4  # 略低于 BF16
+  learning_rate: 2.0e-4  # 略低于理论值，增加稳定性
 ```
 
 ### 5.6 Accelerate 配置
@@ -505,14 +522,16 @@ training_args = TrainingArguments(
 ### 6.3 断点续训
 
 ```python
-# TrainingArguments 中启用断点续训
-training_args = TrainingArguments(
-    # ... 其他参数
-    resume_from_checkpoint=True,  # 自动检测最新 checkpoint
-)
-
-# 或在 trainer.train() 中指定
+# 方式1: 在 trainer.train() 中指定 checkpoint 路径
 trainer.train(resume_from_checkpoint="output/checkpoint-1000")
+
+# 方式2: 自动检测最新 checkpoint
+checkpoint_dir = "output/nanomind_pretrain"
+last_checkpoint = get_last_checkpoint(checkpoint_dir)
+if last_checkpoint is not None:
+    trainer.train(resume_from_checkpoint=last_checkpoint)
+else:
+    trainer.train()
 ```
 
 **checkpoint 保存策略：**
@@ -520,93 +539,24 @@ trainer.train(resume_from_checkpoint="output/checkpoint-1000")
 - `save_total_limit`: 保留最近的 N 个 checkpoint
 - 定期将重要 checkpoint 备份到外部存储
 
-### 6.4 训练脚本示例
+### 6.4 训练脚本架构
 
-> 🚧 **伪代码示例**：展示预期架构，实际脚本 `scripts/train_nanomind.py` 尚未实现
+`scripts/train_nanomind.py` 尚未实现，预期架构如下：
 
-```python
-#!/usr/bin/env python3
-"""nanomind 预训练脚本 - 设计草案"""
-
-import argparse
-from pathlib import Path
-
-import torch
-from accelerate import Accelerator
-from transformers import (
-    AutoConfig,
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForLanguageModeling,
-)
-from datasets import load_from_disk
-import wandb
-
-def main():
-    # 初始化 Accelerator
-    accelerator = Accelerator()
-    
-    # 加载 tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("output/tokenizer_36k")
-    
-    # 创建模型配置
-    model_config = AutoConfig.for_model(
-        "qwen3_next_moe",
-        vocab_size=36005,
-        hidden_size=1152,
-        num_hidden_layers=20,
-        num_attention_heads=8,
-        num_key_value_heads=2,
-        # ... 其他参数
-    )
-    
-    # 初始化模型
-    model = AutoModelForCausalLM.from_config(model_config)
-    
-    # 加载数据集
-    dataset = load_from_disk(config["data_path"])
-    
-    # 数据整理器
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,
-    )
-    
-    # 训练参数
-    training_args = TrainingArguments(
-        output_dir="output/nanomind_pretrain",
-        overwrite_output_dir=True,
-        # ... 从 config 加载
-    )
-    
-    # 初始化 WandB
-    if accelerator.is_main_process:
-        wandb.init(
-            project="nanomind-pretrain",
-            name="nanomind-1b-phase1",
-            config=config,
-        )
-    
-    # 创建 Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset["train"],
-        data_collator=data_collator,
-    )
-    
-    # 训练
-    trainer.train()
-    
-    # 保存
-    if accelerator.is_main_process:
-        trainer.save_model("output/nanomind_pretrain/final")
-
-if __name__ == "__main__":
-    main()
 ```
+1. 加载配置 (YAML + CLI args)
+2. 初始化 Accelerator / DeepSpeed
+3. 加载 Tokenizer
+4. 创建/加载模型
+5. 加载数据集 (HuggingFace Datasets)
+6. 配置 TrainingArguments
+7. 初始化 WandB
+8. 创建 Trainer
+9. 训练循环 (支持断点续训)
+10. 保存最终模型
+```
+
+**关键类**: `Trainer`, `TrainingArguments`, `DataCollatorForLanguageModeling`
 
 ---
 
@@ -659,18 +609,10 @@ if __name__ == "__main__":
 ```
 nanomind/
 ├── config/
-│   ├── model/
-│   │   └── nanomind_1b_moe.yaml      # 🚧 规划中
-│   ├── training/
-│   │   ├── base.yaml                 # 🚧 规划中
-│   │   ├── phase1_short.yaml         # 🚧 规划中
-│   │   ├── phase2_medium.yaml        # 🚧 规划中
-│   │   └── phase3_long.yaml          # 🚧 规划中
-│   ├── deepspeed/
-│   │   ├── zero2.json                # 🚧 规划中
-│   │   └── zero3.json                # 🚧 规划中
-│   └── accelerate/
-│       └── deepspeed_zero2.yaml      # 🚧 规划中
+│   ├── model/                        # 🚧 规划中
+│   ├── training/                     # 🚧 规划中
+│   ├── deepspeed/                    # 🚧 规划中
+│   └── accelerate/                   # 🚧 规划中
 ├── scripts/
 │   ├── train_nanomind.py             # 🚧 规划中
 │   ├── calculate_token_lengths.py    # 🚧 规划中
@@ -679,39 +621,18 @@ nanomind/
 ├── src/
 │   ├── data_processing/              # ✅ 已实现
 │   └── training/                     # 🚧 规划中
-├── docs/
-│   ├── PRETRAINING.md                # 📍 本文档
-│   ├── tokenizer_training_design.md  # ✅ 已完成
-│   └── fineweb_edu_data_reorganization_design.md  # ✅ 已完成
+├── docs/                             # 📚 设计文档
 └── output/
     ├── tokenizer_36k/                # ✅ 已生成
     └── nanomind_pretrain/            # 🚧 规划中
 ```
 
-### 8.2 配置文件清单
-
-| 文件 | 用途 | 路径 | 状态 |
-|------|------|------|------|
-| `nanomind_1b_moe.yaml` | 模型架构 | `config/model/` | 🚧 规划中 |
-| `phase1_short.yaml` | Phase 1 训练 | `config/training/` | 🚧 规划中 |
-| `zero2.json` | ZeRO-2 配置 | `config/deepspeed/` | 🚧 规划中 |
-| `zero3.json` | ZeRO-3 配置 | `config/deepspeed/` | 🚧 规划中 |
-| `deepspeed_zero2.yaml` | Accelerate | `config/accelerate/` | 🚧 规划中 |
-
-### 8.3 参考文献
+### 8.2 参考文献
 
 1. Hoffmann et al. (2022). Training Compute-Optimal Large Language Models. (Chinchilla)
 2. Qwen3 Technical Report
 3. DeepSpeed Documentation: https://www.deepspeed.ai/
 4. Hugging Face Transformers Documentation
-
----
-
-## 文档更新记录
-
-| 版本 | 日期 | 更新内容 |
-|------|------|----------|
-| v0.1 | 2026-03-04 | 初始设计稿，添加实现状态标记，修复 Token ID 冲突 |
 
 ---
 
